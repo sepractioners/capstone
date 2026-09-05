@@ -1,0 +1,53 @@
+id: contracts.create-review-approve
+name: Create and approve a contract draft
+description: Verify draft creation using a managed clause template.
+setup:
+  database: temporary
+  organization_name: Scenario Organization
+  user:
+    email: scenario-admin@local.test
+    password: ScenarioAdmin!2026
+    display_name: Scenario Admin
+permissions:
+  allowed_actions:
+    - bootstrap
+    - login
+    - list_clause_templates
+    - create_contract_draft
+    - submit_for_review
+    - record_review
+    - approve_contract
+steps:
+  - id: bootstrap
+    action: bootstrap
+  - id: login
+    action: login
+  - id: templates
+    action: list_clause_templates
+  - id: draft
+    action: create_contract_draft
+    input:
+      title: Scenario Services Agreement
+      contract_type: vendor-agreement
+      parties:
+        - legal_name: Scenario Customer
+          role: customer
+        - legal_name: Scenario Vendor
+          role: vendor
+      template_index: 0
+  - id: submit
+    action: submit_for_review
+    ref: draft
+  - id: review
+    action: record_review
+    ref: draft
+    input:
+      decision: approved
+  - id: approve
+    action: approve_contract
+    ref: draft
+assertions:
+  lifecycle:
+    final_status: approved
+    transitions: [drafting, in_review, in_review, approved]
+  no_safety_violations: true

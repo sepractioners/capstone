@@ -1,0 +1,51 @@
+id: clauses.create-submit-approve
+name: Create, submit, and approve a clause template
+description: Verify the clause reviewer workflow for an organization-owned template.
+setup:
+  database: temporary
+  organization_name: Scenario Organization
+  user:
+    email: scenario-admin@local.test
+    password: ScenarioAdmin!2026
+    display_name: Scenario Admin
+permissions:
+  allowed_actions:
+    - bootstrap
+    - login
+    - create_clause_template
+    - submit_clause_template
+    - review_clause_template
+steps:
+  - id: bootstrap
+    action: bootstrap
+  - id: login
+    action: login
+  - id: create-template
+    action: create_clause_template
+    input:
+      name: Scenario Confidentiality
+      description: Confidential information protection
+      clause_type: obligation
+      text: Each party shall protect confidential information.
+      tags: [confidentiality, scenario]
+      risk_level: medium
+  - id: submit-template
+    action: submit_clause_template
+    ref: create-template
+  - id: approve-template
+    action: review_clause_template
+    ref: create-template
+    input:
+      decision: approved
+      comments: Deterministic scenario approval
+assertions:
+  template:
+    status: approved
+  trace:
+    actions:
+      - bootstrap
+      - login
+      - create_clause_template
+      - submit_clause_template
+      - review_clause_template
+  no_safety_violations: true

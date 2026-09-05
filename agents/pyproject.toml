@@ -1,0 +1,19 @@
+[project]
+name = "extraction-agent"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "any-llm-sdk[anthropic]",
+    "langgraph",
+    "llama-index-core",
+    "llama-index-readers-file",
+    "mcp>=2.0",
+    "pydantic>=2",
+    "pyyaml>=6",
+]
+
+[tool.setuptools.packages.find]
+include = ["extraction_agent*"]
+
+[tool.setuptools.package-data]
+extraction_agent = ["*.yaml"]

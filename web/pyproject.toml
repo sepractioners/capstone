@@ -1,0 +1,16 @@
+[project]
+name = "clm-web"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "contract-lifecycle",
+    "clm-mcp-server",
+    "extraction-agent",
+    "fastapi>=0.115",
+    "hypercorn>=0.17",
+    "PyJWT>=2.9",
+    "python-multipart>=0.0.20",
+]
+
+[tool.setuptools.packages.find]
+include = ["clm_web*"]

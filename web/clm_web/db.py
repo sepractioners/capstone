@@ -1,0 +1,123 @@
+"""SQLite persistence for web identity, tenancy, and client credentials."""
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+class WebDatabase:
+    """Create and access the web application's tables in the CLM database."""
+
+    def __init__(self, database_path: str) -> None:
+        self.database_path = database_path
+        Path(database_path).parent.mkdir(parents=True, exist_ok=True)
+        self.initialize()
+
+    def connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def initialize(self) -> None:
+        connection = self.connect()
+        try:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS organizations (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS memberships (
+                    user_id TEXT NOT NULL REFERENCES users(id),
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    role TEXT NOT NULL,
+                    PRIMARY KEY (user_id, organization_id)
+                );
+                CREATE TABLE IF NOT EXISTS oauth_clients (
+                    client_id TEXT PRIMARY KEY,
+                    client_secret_hash TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    scopes TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS contract_tenants (
+                    contract_id TEXT PRIMARY KEY,
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_memberships_org ON memberships(organization_id);
+                CREATE INDEX IF NOT EXISTS idx_contract_tenants_org ON contract_tenants(organization_id);
+                CREATE TABLE IF NOT EXISTS clause_templates (
+                    id TEXT PRIMARY KEY,
+                    organization_id TEXT REFERENCES organizations(id),
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    clause_type TEXT NOT NULL,
+                    tags TEXT NOT NULL DEFAULT '',
+                    contract_types TEXT NOT NULL DEFAULT '',
+                    jurisdiction TEXT NOT NULL DEFAULT '',
+                    risk_level TEXT NOT NULL DEFAULT 'medium',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    current_version INTEGER NOT NULL DEFAULT 1,
+                    created_by TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS clause_template_versions (
+                    template_id TEXT NOT NULL REFERENCES clause_templates(id),
+                    version INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (template_id, version)
+                );
+                CREATE TABLE IF NOT EXISTS clause_template_reviews (
+                    id TEXT PRIMARY KEY,
+                    template_id TEXT NOT NULL REFERENCES clause_templates(id),
+                    version INTEGER NOT NULL,
+                    reviewer_id TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    comments TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS contract_clause_provenance (
+                    contract_id TEXT NOT NULL,
+                    clause_id TEXT NOT NULL,
+                    template_id TEXT NOT NULL REFERENCES clause_templates(id),
+                    template_version INTEGER NOT NULL,
+                    PRIMARY KEY (contract_id, clause_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_clause_templates_org ON clause_templates(organization_id, status);
+                CREATE INDEX IF NOT EXISTS idx_clause_reviews_template ON clause_template_reviews(template_id);
+                """
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            builtins = (
+                ("global_confidentiality", "Confidentiality", "Protect confidential information.", "obligation", "Each party shall protect the other party's confidential information and use it only to perform this agreement."),
+                ("global_payment", "Payment", "Standard invoice payment obligation.", "obligation", "Customer shall pay all undisputed invoices within thirty days of receipt."),
+                ("global_termination", "Termination", "Termination for uncured material breach.", "condition", "Either party may terminate this agreement for material breach if the breach is not cured within thirty days after written notice."),
+            )
+            for template_id, name, description, clause_type, text in builtins:
+                connection.execute(
+                    "INSERT OR IGNORE INTO clause_templates VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 'approved', 1, 'system', ?, ?)",
+                    (template_id, name, description, clause_type, "", "", "", "medium", now, now),
+                )
+                connection.execute(
+                    "INSERT OR IGNORE INTO clause_template_versions VALUES (?, 1, ?, 'system', ?)",
+                    (template_id, text, now),
+                )
+            connection.commit()
+        finally:
+            connection.close()

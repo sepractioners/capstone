@@ -1,0 +1,29 @@
+# Local secrets and development environment
+.env
+*.env
+.certs/
+.venv/
+.claude/
+
+# Python caches and generated package metadata
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Local databases and runtime artifacts
+*.sqlite3
+*.db
+platform_testing/reports/*
+!platform_testing/reports/.gitkeep
+
+# Frontend dependencies and build output
+node_modules/
+dist/
+web/frontend/.vite/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
