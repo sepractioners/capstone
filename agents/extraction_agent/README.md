@@ -1,4 +1,4 @@
-# Capstone
+# Capstone - Contract Extraction Agent
 
 The extraction agent turns contract source files into validated contract candidates and submits them to the Contract Lifecycle Management domain through the MCP server.
 
