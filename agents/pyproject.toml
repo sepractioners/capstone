@@ -1,19 +1,27 @@
 [project]
 name = "extraction-agent"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "any-llm-sdk[anthropic]",
+    "dep:llm",
+    "dep:config",
     "langgraph",
     "llama-index-core",
     "llama-index-readers-file",
-    "mcp>=2.0",
+    "mcp>=1.29,<2",
     "pydantic>=2",
-    "pyyaml>=6",
 ]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools.packages.find]
-include = ["extraction_agent*"]
+include = ["extraction_agent*", "query_agent*", "agent_trace*", "agent_llm*"]
 
 [tool.setuptools.package-data]
-extraction_agent = ["*.yaml"]
+extraction_agent = ["*.yaml", "profiles/*.yaml"]
+query_agent = ["prompts/*.yaml"]
+
+[project.optional-dependencies]
+rag = ["dep:rag"]
