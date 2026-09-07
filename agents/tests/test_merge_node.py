@@ -8,7 +8,17 @@ policy in isolation.
 import unittest
 
 from extraction_agent.merge_node import merge_page_extractions
-from extraction_agent.schema import ContractCandidate, ExtractedClause, ExtractedParty, ExtractedSigner, PageExtraction
+from extraction_agent.schema import (
+    ContractCandidate,
+    ExtractedClause,
+    ExtractedKeyDates,
+    ExtractedObligation,
+    ExtractedParty,
+    ExtractedRenewalTerms,
+    ExtractedSigner,
+    ExtractedTerminationTerms,
+    PageExtraction,
+)
 
 
 def _merge(pages: list[PageExtraction], source_document_hash: str) -> ContractCandidate:
@@ -83,6 +93,60 @@ class MergeNodeTest(unittest.TestCase):
         candidate = _merge(pages, "h4")
 
         self.assertEqual(len(candidate.signers), 1)
+
+    def test_obligation_trigger_and_consequence_are_folded_from_every_copy(self) -> None:
+        pages = [
+            PageExtraction(
+                page_number=1,
+                obligations=[
+                    ExtractedObligation(
+                        description="Pay the fee",
+                        responsible_party_legal_name="Acme Corp",
+                        trigger_event="upon receipt of invoice",
+                    )
+                ],
+            ),
+            PageExtraction(
+                page_number=2,
+                obligations=[
+                    ExtractedObligation(
+                        description="Pay the fee",
+                        responsible_party_legal_name="Acme Corp",
+                        consequence_of_failure="1.5% monthly interest",
+                        evidence_requirements=["paid invoice"],
+                    )
+                ],
+            ),
+        ]
+
+        candidate = _merge(pages, "h-obl")
+
+        self.assertEqual(len(candidate.obligations), 1)
+        merged = candidate.obligations[0]
+        self.assertEqual(merged.trigger_event, "upon receipt of invoice")
+        self.assertEqual(merged.consequence_of_failure, "1.5% monthly interest")
+        self.assertEqual(merged.evidence_requirements, ["paid invoice"])
+
+    def test_renewal_and_termination_terms_take_first_value_and_boolean_or(self) -> None:
+        pages = [
+            PageExtraction(
+                page_number=1,
+                renewal_terms=ExtractedRenewalTerms(auto_renew=True, renewal_notice_days=60),
+                key_dates=ExtractedKeyDates(renewal_deadline=None),
+            ),
+            PageExtraction(
+                page_number=2,
+                renewal_terms=ExtractedRenewalTerms(renewal_term_length_months=12),
+                termination_terms=ExtractedTerminationTerms(termination_for_convenience=True),
+            ),
+        ]
+
+        candidate = _merge(pages, "h-terms")
+
+        self.assertTrue(candidate.renewal_terms.auto_renew)
+        self.assertEqual(candidate.renewal_terms.renewal_notice_days, 60)
+        self.assertEqual(candidate.renewal_terms.renewal_term_length_months, 12)
+        self.assertTrue(candidate.termination_terms.termination_for_convenience)
 
     def test_no_pages_produces_untitled_unclassified_candidate(self) -> None:
         candidate = _merge([], "h5")

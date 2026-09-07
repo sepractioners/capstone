@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,6 +36,10 @@ class ExtractedObligation(BaseModel):
     due_date: Optional[date] = None
     recurrence_frequency: Optional[str] = None
     recurrence_interval: int = 1
+    trigger_event: str = ""
+    consequence_of_failure: str = ""
+    grace_period_days: int = 0
+    evidence_requirements: list[str] = Field(default_factory=list)
 
 
 class ExtractedSigner(BaseModel):
@@ -49,6 +53,8 @@ class ExtractedKeyDates(BaseModel):
     effective_date: Optional[date] = None
     execution_date: Optional[date] = None
     expiration_date: Optional[date] = None
+    renewal_deadline: Optional[date] = None
+    termination_notice_deadline: Optional[date] = None
 
 
 class ExtractedCommercialTerms(BaseModel):
@@ -57,9 +63,28 @@ class ExtractedCommercialTerms(BaseModel):
     payment_terms: Optional[str] = None
 
 
+class ExtractedRenewalTerms(BaseModel):
+    auto_renew: bool = False
+    renewal_notice_days: Optional[int] = None
+    renewal_term_length_months: Optional[int] = None
+
+
+class ExtractedTerminationTerms(BaseModel):
+    notice_period_days: Optional[int] = None
+    cure_period_days: int = 0
+    termination_for_convenience: bool = False
+
+
 class FieldConflict(BaseModel):
     field: str
     candidate_values: list[str]
+
+
+class ReviewFinding(BaseModel):
+    field: str
+    issue: str
+    severity: str = "warning"
+    suggestion: str = ""
 
 
 class ContractCandidate(BaseModel):
@@ -76,7 +101,12 @@ class ContractCandidate(BaseModel):
     signers: list[ExtractedSigner] = Field(default_factory=list)
     key_dates: ExtractedKeyDates = Field(default_factory=ExtractedKeyDates)
     commercial_terms: ExtractedCommercialTerms = Field(default_factory=ExtractedCommercialTerms)
+    renewal_terms: ExtractedRenewalTerms = Field(default_factory=ExtractedRenewalTerms)
+    termination_terms: ExtractedTerminationTerms = Field(default_factory=ExtractedTerminationTerms)
     field_conflicts: list[FieldConflict] = Field(default_factory=list)
+    review_findings: list[ReviewFinding] = Field(default_factory=list)
+    review_summary: str = ""
+    extraction_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SkippedStage(BaseModel):
@@ -91,3 +121,6 @@ class IngestResult(BaseModel):
     already_ingested: bool
     skipped_stages: list[SkippedStage] = Field(default_factory=list)
     field_conflicts: list[FieldConflict] = Field(default_factory=list)
+    review_findings: list[ReviewFinding] = Field(default_factory=list)
+    review_summary: str = ""
+    extraction_trace: list[dict[str, Any]] = Field(default_factory=list)

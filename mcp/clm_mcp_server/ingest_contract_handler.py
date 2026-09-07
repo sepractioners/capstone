@@ -27,6 +27,7 @@ from contract_lifecycle.application.commands import (
     ApproveContractCommand,
     CreateContractCommand,
     MarkExecutedCommand,
+    RecordContractTermsCommand,
     RecordReviewCommand,
     RecordSignatureCommand,
     RegisterObligationCommand,
@@ -51,11 +52,15 @@ from contract_lifecycle.domain.value_objects import (
     DocumentReference,
     DueDate,
     Jurisdiction,
+    KeyDates,
     LegalName,
+    NoticePeriod,
     ObligationId,
     PartyId,
     RecurrenceFrequency,
     RecurrenceRule,
+    RenewalTerms,
+    TerminationTerms,
 )
 
 from .dependencies import Dependencies
@@ -124,6 +129,10 @@ def ingest_contract(candidate: ContractCandidate, deps: Dependencies) -> IngestR
         )
     )
 
+    terms_command = _terms_command(candidate, contract.id, contract_number, correlation_id)
+    if terms_command is not None:
+        contract = deps.intake.handle_record_terms(terms_command)
+
     party_index = _party_index(contract.parties)
 
     for i, extracted_clause in enumerate(candidate.clauses, start=1):
@@ -155,10 +164,15 @@ def ingest_contract(candidate: ContractCandidate, deps: Dependencies) -> IngestR
             description=extracted_obligation.description,
             responsible_party_id=responsible.party_id,
             owner_actor_id=SYSTEM_ACTOR.actor_id,
-            due_date_rule=DueDate(value=extracted_obligation.due_date),
+            due_date_rule=DueDate(
+                value=extracted_obligation.due_date,
+                grace_period_days=max(0, extracted_obligation.grace_period_days),
+            ),
             recurrence=_resolve_recurrence(
                 extracted_obligation.recurrence_frequency, extracted_obligation.recurrence_interval
             ),
+            evidence_requirements=tuple(extracted_obligation.evidence_requirements),
+            consequence_of_failure=extracted_obligation.consequence_of_failure or None,
         )
         contract, _occurrences = deps.obligations.handle_register(
             RegisterObligationCommand(
@@ -296,6 +310,60 @@ def _finalize(contract: Contract, skipped: list[SkippedStage], candidate: Contra
         already_ingested=False,
         skipped_stages=skipped,
         field_conflicts=candidate.field_conflicts,
+        review_findings=candidate.review_findings,
+        review_summary=candidate.review_summary,
+        extraction_trace=candidate.extraction_trace,
+    )
+
+
+def _notice_period(days: Optional[int]) -> Optional[NoticePeriod]:
+    return NoticePeriod(days) if days is not None and days > 0 else None
+
+
+def _terms_command(
+    candidate: ContractCandidate,
+    contract_id,
+    contract_number: ContractNumber,
+    correlation_id: str,
+) -> Optional[RecordContractTermsCommand]:
+    """Build the terms command from the extracted candidate, or None when the
+    source document stated no renewal / termination / deadline facts."""
+    kd = candidate.key_dates
+    key_dates = None
+    if kd.renewal_deadline or kd.termination_notice_deadline:
+        key_dates = KeyDates(
+            renewal_deadline=kd.renewal_deadline,
+            termination_notice_deadline=kd.termination_notice_deadline,
+        )
+
+    rt = candidate.renewal_terms
+    renewal_terms = None
+    if rt.auto_renew or rt.renewal_notice_days or rt.renewal_term_length_months:
+        renewal_terms = RenewalTerms(
+            auto_renew=rt.auto_renew,
+            renewal_notice=_notice_period(rt.renewal_notice_days),
+            renewal_term_length_months=rt.renewal_term_length_months,
+        )
+
+    tt = candidate.termination_terms
+    termination_terms = None
+    if tt.notice_period_days or tt.cure_period_days or tt.termination_for_convenience:
+        termination_terms = TerminationTerms(
+            notice_period=_notice_period(tt.notice_period_days),
+            cure_period_days=max(0, tt.cure_period_days),
+            termination_for_convenience=tt.termination_for_convenience,
+        )
+
+    if key_dates is None and renewal_terms is None and termination_terms is None:
+        return None
+    return RecordContractTermsCommand(
+        idempotency_key=f"terms-{contract_number}",
+        actor=SYSTEM_ACTOR,
+        correlation_id=correlation_id,
+        contract_id=contract_id,
+        key_dates=key_dates,
+        renewal_terms=renewal_terms,
+        termination_terms=termination_terms,
     )
 
 

@@ -1,6 +1,7 @@
-"""The CLM MCP server: three coarse-grained tools - `ingest_contract`,
-`get_contract`, and `get_source_document` - are the only sanctioned entry
-points into the domain for any external agent.
+"""Legacy extraction MCP compatibility server.
+
+New callers use ``extraction_mcp_server.server`` for write tools and
+``query_mcp_server.server`` for read-only organization analysis.
 """
 from __future__ import annotations
 
@@ -11,7 +12,10 @@ from typing import Any
 from contract_lifecycle.domain.exceptions import NotFoundError
 from contract_lifecycle.domain.value_objects import ContractId
 from contract_lifecycle.infrastructure.sqlite.contract_mapper import ContractMapper
-from mcp.server.mcpserver import MCPServer
+try:  # mcp>=2.0
+    from mcp.server.mcpserver import MCPServer
+except ModuleNotFoundError:  # mcp 1.x compatibility
+    from mcp.server.fastmcp import FastMCP as MCPServer
 
 from .dependencies import Dependencies, build_dependencies
 from .ingest_contract_handler import ingest_contract as _ingest_contract

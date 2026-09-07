@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,13 +36,17 @@ class ExtractedClause(BaseModel):
 
 
 class ExtractedObligation(BaseModel):
-    """An obligation with its responsible party and optional timing."""
+    """An obligation with its responsible party, timing, trigger, and stakes."""
 
     description: str
     responsible_party_legal_name: str
     due_date: Optional[date] = None
     recurrence_frequency: Optional[str] = None
     recurrence_interval: int = 1
+    trigger_event: str = ""
+    consequence_of_failure: str = ""
+    grace_period_days: int = 0
+    evidence_requirements: list[str] = Field(default_factory=list)
 
 
 class ExtractedSigner(BaseModel):
@@ -60,6 +64,8 @@ class ExtractedKeyDates(BaseModel):
     effective_date: Optional[date] = None
     execution_date: Optional[date] = None
     expiration_date: Optional[date] = None
+    renewal_deadline: Optional[date] = None
+    termination_notice_deadline: Optional[date] = None
 
 
 class ExtractedCommercialTerms(BaseModel):
@@ -70,6 +76,22 @@ class ExtractedCommercialTerms(BaseModel):
     payment_terms: Optional[str] = None
 
 
+class ExtractedRenewalTerms(BaseModel):
+    """How the contract renews, when stated in the source text."""
+
+    auto_renew: bool = False
+    renewal_notice_days: Optional[int] = None
+    renewal_term_length_months: Optional[int] = None
+
+
+class ExtractedTerminationTerms(BaseModel):
+    """How the contract can be ended, when stated in the source text."""
+
+    notice_period_days: Optional[int] = None
+    cure_period_days: int = 0
+    termination_for_convenience: bool = False
+
+
 class FieldConflict(BaseModel):
     """Distinct singleton values found for one field across pages."""
 
@@ -77,18 +99,38 @@ class FieldConflict(BaseModel):
     candidate_values: list[str]
 
 
+class ReviewFinding(BaseModel):
+    """One issue raised by the document-level review reasoning pass."""
+
+    field: str
+    issue: str
+    severity: str = "warning"  # info | warning | blocker
+    suggestion: str = ""
+
+
+class ExtractionDirective(BaseModel):
+    """A user preference that guides extraction but is never source evidence."""
+
+    raw_instruction: str
+    requested_contract_type: Optional[str] = None
+
+
 class PageExtraction(BaseModel):
     """What one page/chunk LLM call is asked to produce."""
 
+    reasoning: str = ""
     page_number: int
     title: Optional[str] = None
     contract_type: Optional[str] = None
+    defined_terms: dict[str, str] = Field(default_factory=dict)
     parties: list[ExtractedParty] = Field(default_factory=list)
     clauses: list[ExtractedClause] = Field(default_factory=list)
     obligations: list[ExtractedObligation] = Field(default_factory=list)
     signers: list[ExtractedSigner] = Field(default_factory=list)
     key_dates: ExtractedKeyDates = Field(default_factory=ExtractedKeyDates)
     commercial_terms: ExtractedCommercialTerms = Field(default_factory=ExtractedCommercialTerms)
+    renewal_terms: ExtractedRenewalTerms = Field(default_factory=ExtractedRenewalTerms)
+    termination_terms: ExtractedTerminationTerms = Field(default_factory=ExtractedTerminationTerms)
     continues_from_previous_page: bool = False
 
 
@@ -108,4 +150,9 @@ class ContractCandidate(BaseModel):
     signers: list[ExtractedSigner] = Field(default_factory=list)
     key_dates: ExtractedKeyDates = Field(default_factory=ExtractedKeyDates)
     commercial_terms: ExtractedCommercialTerms = Field(default_factory=ExtractedCommercialTerms)
+    renewal_terms: ExtractedRenewalTerms = Field(default_factory=ExtractedRenewalTerms)
+    termination_terms: ExtractedTerminationTerms = Field(default_factory=ExtractedTerminationTerms)
     field_conflicts: list[FieldConflict] = Field(default_factory=list)
+    review_findings: list[ReviewFinding] = Field(default_factory=list)
+    review_summary: str = ""
+    extraction_trace: list[dict[str, Any]] = Field(default_factory=list)

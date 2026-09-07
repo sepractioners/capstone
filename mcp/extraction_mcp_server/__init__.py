@@ -1,0 +1,1 @@
+"""Write-capable MCP server for the extraction agent."""

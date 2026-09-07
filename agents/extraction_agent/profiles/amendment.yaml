@@ -1,0 +1,16 @@
+id: amendment
+name: Contract amendment
+keywords:
+  - amendment
+  - amended
+  - addendum
+required_fields:
+  - title
+  - parties
+  - clauses
+recommended_fields:
+  - key_dates.effective_date
+  - key_dates.execution_date
+  - signers
+  - obligations
+not_applicable_by_default: []

@@ -1,0 +1,15 @@
+id: affiliate-agreement
+name: Affiliate agreement
+keywords:
+  - affiliate agreement
+  - affiliate
+required_fields:
+  - title
+  - parties
+  - clauses
+recommended_fields:
+  - key_dates.effective_date
+  - commercial_terms
+  - obligations
+  - signers
+not_applicable_by_default: []

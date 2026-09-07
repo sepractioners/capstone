@@ -2,15 +2,16 @@
 
 ## Installation
 
-From the repository root, install the sibling packages into the same Python environment:
+From the repository root:
 
 ```powershell
-python -m pip install -e .\app
-python -m pip install -e .\mcp
-python -m pip install -e .\agents
+uv sync --all-packages
 ```
 
-The MCP subprocess must be able to import both `clm_mcp_server` and `contract_lifecycle`. Installing all three packages avoids import-path problems when the client launches the server in a separate process.
+This installs every workspace member (`app`, `mcp`, `agents`, `web`, ...) into
+the shared `.venv`. The MCP subprocess spawned by `mcp_client.py` needs
+`extraction_mcp_server` and `contract_lifecycle` importable; syncing the whole
+workspace guarantees that.
 
 ## Python API
 
@@ -26,29 +27,41 @@ for result in results:
     print(result["contract_id"], result["lifecycle_status"])
 ```
 
-The asynchronous equivalent is `await extraction_agent.pipeline.arun(...)`.
+The asynchronous equivalent is `await extraction_agent.pipeline.arun(...)`, which
+also accepts an optional non-authoritative `extraction_directive` dict and an
+`async progress_callback(payload)` for streaming safe stage events. The web agent
+orchestrator uses `arun` with both; `run` covers the simple synchronous case.
+`await extraction_agent.pipeline.acandidates(file_path)` runs `load → extract →
+review` and returns the `ContractCandidate` list **without ingesting** - used by
+the extraction eval harness.
 
 ## Model Configuration
 
-Set the LLM provider and model for PDF extraction with:
+All provider/model/timeout settings are resolved centrally by `agent_llm` from
+the repo-root `.env` (see [`.env.example`](../../../.env.example)). The shared
+defaults:
 
-```powershell
-$env:EXTRACTION_LLM_PROVIDER = "anthropic"
-$env:EXTRACTION_LLM_MODEL = "claude-haiku-4-5-20251001"
+```env
+LLM_PROVIDER=anthropic
+LLM_MODEL=claude-haiku-4-5-20251001
 ```
 
-Any provider supported by `any-llm` works the same way. A local Ollama model, for example:
+To point everything at a local (or LAN) Ollama model instead:
 
-```powershell
-$env:EXTRACTION_LLM_PROVIDER = "ollama"
-$env:EXTRACTION_LLM_MODEL = "gemma4:latest"
+```env
+LLM_PROVIDER=ollama
+LLM_MODEL=gemma4:latest
+OLLAMA_HOST=http://192.168.1.172:11434
 ```
 
-JSON and CSV inputs do not call the LLM.
+Override just this agent with `EXTRACTION_LLM_PROVIDER` / `EXTRACTION_LLM_MODEL`
+when PDF extraction should differ from the shared values. JSON and CSV inputs do
+not call the LLM.
 
 ## MCP Tools
 
-The server exposes three tools:
+`mcp_client.py` launches `python -m extraction_mcp_server.server` over stdio. The
+server exposes three tools:
 
 - `ingest_contract(candidate)`: persist one extracted candidate and return its lifecycle result.
 - `get_contract(contract_id)`: read back the stored contract.
@@ -56,12 +69,17 @@ The server exposes three tools:
 
 The client wrappers are `ingest_via_mcp`, `get_contract_via_mcp`, and `get_source_document_via_mcp` in `mcp_client.py`.
 
+The older `clm_mcp_server.server` module remains only for backward compatibility;
+new extraction work uses `extraction_mcp_server`, and contract analysis uses the
+read-only `query_mcp_server` (see [mcp/README.md](../../../mcp/README.md)).
+
 ## Tests
 
 Run the extraction-agent tests from the repository root:
 
 ```powershell
-python -m pytest .\agents\tests
+uv run pytest agents/tests
 ```
 
-The structured pipeline tests exercise the real MCP subprocess and therefore require the `app`, `mcp`, and `agents` packages to be installed in the active environment.
+The structured pipeline tests exercise the real MCP subprocess, which needs the
+whole workspace synced (`uv sync --all-packages`).

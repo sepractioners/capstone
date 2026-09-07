@@ -16,8 +16,11 @@ from clm_mcp_server.ingest_payload import (
     ContractCandidate,
     ExtractedClause,
     ExtractedKeyDates,
+    ExtractedObligation,
     ExtractedParty,
+    ExtractedRenewalTerms,
     ExtractedSigner,
+    ExtractedTerminationTerms,
 )
 from contract_lifecycle.domain.value_objects import ContractId
 
@@ -132,6 +135,34 @@ class IngestContractHandlerTest(unittest.TestCase):
         # The reference to the source document is still there too - text
         # supplements it, it doesn't replace it.
         self.assertEqual(contract.clauses[0].text_reference.content_hash, "hash-clause-text")
+
+    def test_renewal_termination_and_obligation_consequence_are_persisted(self) -> None:
+        candidate = _base_candidate("hash-terms")
+        candidate.renewal_terms = ExtractedRenewalTerms(auto_renew=True, renewal_notice_days=60)
+        candidate.termination_terms = ExtractedTerminationTerms(
+            notice_period_days=90, termination_for_convenience=True
+        )
+        candidate.obligations = [
+            ExtractedObligation(
+                description="Pay the annual fee",
+                responsible_party_legal_name="Acme Corp",
+                due_date=date(2021, 1, 1),
+                trigger_event="on each anniversary",
+                consequence_of_failure="10% late fee",
+                grace_period_days=15,
+            )
+        ]
+
+        result = ingest_contract(candidate, self.deps)
+        contract = self.deps.repository.get(ContractId(result.contract_id))
+
+        self.assertTrue(contract.renewal_terms.auto_renew)
+        self.assertEqual(contract.renewal_terms.renewal_notice.days, 60)
+        self.assertTrue(contract.termination_terms.termination_for_convenience)
+        self.assertEqual(contract.termination_terms.notice_period.days, 90)
+        self.assertEqual(len(contract.obligations), 1)
+        self.assertEqual(contract.obligations[0].consequence_of_failure, "10% late fee")
+        self.assertEqual(contract.obligations[0].due_date_rule.grace_period_days, 15)
 
     def test_reingesting_same_document_does_not_error_storing_blob_twice(self) -> None:
         candidate = _base_candidate("hash-source-doc-repeat")

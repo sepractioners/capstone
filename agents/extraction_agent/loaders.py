@@ -9,9 +9,12 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def content_hash_for(payload: bytes) -> str:
@@ -60,6 +63,7 @@ def load(file_path: str) -> LoadedDocument:
     suffix = path.suffix.lower().lstrip(".")
     raw_bytes = path.read_bytes()
     file_hash = content_hash_for(raw_bytes)
+    logger.debug("load start path=%s bytes=%s format=%s", file_path, len(raw_bytes), suffix)
 
     if suffix == "pdf":
         chunks = _load_pdf(path)
@@ -70,9 +74,11 @@ def load(file_path: str) -> LoadedDocument:
     else:
         raise UnsupportedFormatError(f"Unsupported file format: {suffix!r} ({file_path})")
 
-    return LoadedDocument(
+    document = LoadedDocument(
         format=suffix, file_path=str(path), file_content_hash=file_hash, file_bytes=raw_bytes, chunks=chunks
     )
+    logger.debug("load complete path=%s chunks=%s hash=%s", file_path, len(chunks), file_hash)
+    return document
 
 
 def _load_pdf(path: Path) -> list[LoadedChunk]:

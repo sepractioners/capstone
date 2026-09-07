@@ -1,0 +1,17 @@
+id: co-branding-agreement
+name: Co-branding agreement
+keywords:
+  - co-branding
+  - co branded
+  - co-branded
+  - branding agreement
+required_fields:
+  - title
+  - parties
+  - key_dates.effective_date
+  - clauses
+recommended_fields:
+  - commercial_terms
+  - obligations
+  - signers
+not_applicable_by_default: []

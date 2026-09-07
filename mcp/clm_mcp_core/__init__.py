@@ -1,0 +1,1 @@
+"""Shared infrastructure for separate extraction and query MCP servers."""

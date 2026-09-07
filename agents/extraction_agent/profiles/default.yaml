@@ -1,0 +1,13 @@
+id: unclassified
+name: Unclassified contract
+keywords: []
+required_fields:
+  - title
+  - parties
+recommended_fields:
+  - contract_type
+  - key_dates
+  - clauses
+  - obligations
+  - commercial_terms
+  - signers

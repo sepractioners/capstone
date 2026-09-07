@@ -6,15 +6,19 @@ Notes from getting PDF extraction actually working, kept here so the next person
 
 `extract_node` in `graph.py` runs inside LangGraph's `ainvoke`, which means it is already executing inside a running asyncio event loop. `any_llm`'s sync `completion()` refuses to run in that situation (`RuntimeError: Cannot use the sync API in an async context`). `extract_page` in `extraction_node.py` must call `any_llm.acompletion()` (awaited), never the sync `completion()`, whenever it is invoked from inside the graph.
 
-## A Local Model Can Return a Technically Valid but Empty Extraction
+## A Local Model May Return a Technically Valid but Empty Extraction
 
-Testing against a local Ollama model (`gemma4:latest`, 8B, Q4_K_M) with the first version of the system prompt, a plain rules-only list of instructions, produced responses that satisfied the `PageExtraction` schema while leaving every optional field empty, even on pages that plainly contained a title, two named parties, and later a signature block:
+One earlier test against a local Ollama model (`gemma4:latest`, 8B, Q4_K_M) with the first version of the system prompt, a plain rules-only list of instructions, reportedly produced responses that satisfied the `PageExtraction` schema while leaving every optional field empty. This is a reproducible test hypothesis, not a general conclusion about the model. A slow or cancelled run must be classified separately as a timeout/inconclusive result.
 
 ```json
 {"page_number": 1, "continues_from_previous_page": false}
 ```
 
-This is not a parsing bug on our side: `response.choices[0].message.parsed` correctly reflected what the model returned. The model was simply not extracting anything.
+If reproduced, this is not necessarily a parsing bug: `response.choices[0].message.parsed` may correctly reflect what the model returned. Capture the raw parsed response, configured timeout, attempt count, page text length, and field coverage before attributing the result to model behavior.
+
+## Chain-of-Thought Is Now Captured, Not Suppressed
+
+An earlier version of `system_prompt.yaml` ended with "Do not return an explanation or reasoning trace; return only the schema." That was removed. `PageExtraction` now has a `reasoning` field the model fills before the typed fields; it is written to the extraction trace (truncated) and dropped from the merged candidate. For a small local model, letting it reason in-schema noticeably helps field coverage. If you see the model putting content into `reasoning` that belongs in a typed field, tighten the "everything else must go in its typed field" line rather than removing the field.
 
 ## Enabling the Model's Thinking Mode Did Not Fix It
 

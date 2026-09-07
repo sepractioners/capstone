@@ -21,7 +21,9 @@ from .schema import (
     ExtractedKeyDates,
     ExtractedObligation,
     ExtractedParty,
+    ExtractedRenewalTerms,
     ExtractedSigner,
+    ExtractedTerminationTerms,
     FieldConflict,
     PageExtraction,
 )
@@ -36,6 +38,7 @@ def merge_page_extractions(
     source_media_type: str,
     source_content_base64: str,
     source_original_filename: Optional[str] = None,
+    extraction_trace: Optional[list[dict[str, object]]] = None,
 ) -> ContractCandidate:
     """Combine page-level extractions into one ingest-ready candidate.
 
@@ -53,16 +56,15 @@ def merge_page_extractions(
 
     parties = _merge_parties(p for page in pages for p in page.parties)
     clauses = _dedupe_clauses(c for page in pages for c in page.clauses)
-    obligations = _dedupe_by_key(
-        (o for page in pages for o in page.obligations),
-        key=lambda o: (o.description.strip().lower(), o.responsible_party_legal_name.strip().lower()),
-    )
+    obligations = _merge_obligations(o for page in pages for o in page.obligations)
     signers = _dedupe_by_key(
         (s for page in pages for s in page.signers),
         key=lambda s: (s.party_legal_name.strip().lower(), s.signer_role.strip().lower()),
     )
     key_dates = _merge_key_dates(p.key_dates for p in pages)
     commercial_terms = _merge_commercial_terms(p.commercial_terms for p in pages)
+    renewal_terms = _merge_renewal_terms(p.renewal_terms for p in pages)
+    termination_terms = _merge_termination_terms(p.termination_terms for p in pages)
 
     return ContractCandidate(
         source_document_hash=source_document_hash,
@@ -78,7 +80,10 @@ def merge_page_extractions(
         signers=signers,
         key_dates=key_dates,
         commercial_terms=commercial_terms,
+        renewal_terms=renewal_terms,
+        termination_terms=termination_terms,
         field_conflicts=conflicts,
+        extraction_trace=extraction_trace or [],
     )
 
 
@@ -140,14 +145,80 @@ def _merge_parties(parties) -> list[ExtractedParty]:
     return list(merged.values())
 
 
+def _merge_obligations(obligations) -> list[ExtractedObligation]:
+    """Deduplicate obligations, folding trigger/consequence detail from every copy."""
+    merged: dict[tuple[str, str], ExtractedObligation] = {}
+    for obligation in obligations:
+        key = (
+            obligation.description.strip().lower(),
+            obligation.responsible_party_legal_name.strip().lower(),
+        )
+        if key not in merged:
+            merged[key] = obligation
+            continue
+        existing = merged[key]
+        merged[key] = existing.model_copy(
+            update={
+                "due_date": existing.due_date or obligation.due_date,
+                "recurrence_frequency": existing.recurrence_frequency or obligation.recurrence_frequency,
+                "trigger_event": existing.trigger_event or obligation.trigger_event,
+                "consequence_of_failure": existing.consequence_of_failure or obligation.consequence_of_failure,
+                "grace_period_days": existing.grace_period_days or obligation.grace_period_days,
+                "evidence_requirements": list(
+                    dict.fromkeys([*existing.evidence_requirements, *obligation.evidence_requirements])
+                ),
+            }
+        )
+    return list(merged.values())
+
+
 def _merge_key_dates(key_dates_list) -> ExtractedKeyDates:
     """Fill each key date with the first value observed across pages."""
     effective, execution, expiration = None, None, None
+    renewal_deadline, termination_notice_deadline = None, None
     for kd in key_dates_list:
         effective = effective or kd.effective_date
         execution = execution or kd.execution_date
         expiration = expiration or kd.expiration_date
-    return ExtractedKeyDates(effective_date=effective, execution_date=execution, expiration_date=expiration)
+        renewal_deadline = renewal_deadline or kd.renewal_deadline
+        termination_notice_deadline = termination_notice_deadline or kd.termination_notice_deadline
+    return ExtractedKeyDates(
+        effective_date=effective,
+        execution_date=execution,
+        expiration_date=expiration,
+        renewal_deadline=renewal_deadline,
+        termination_notice_deadline=termination_notice_deadline,
+    )
+
+
+def _merge_renewal_terms(terms_list) -> ExtractedRenewalTerms:
+    """First observed value per field; auto_renew is true if any page saw it."""
+    auto_renew = False
+    notice_days, term_months = None, None
+    for t in terms_list:
+        auto_renew = auto_renew or t.auto_renew
+        notice_days = notice_days if notice_days is not None else t.renewal_notice_days
+        term_months = term_months if term_months is not None else t.renewal_term_length_months
+    return ExtractedRenewalTerms(
+        auto_renew=auto_renew,
+        renewal_notice_days=notice_days,
+        renewal_term_length_months=term_months,
+    )
+
+
+def _merge_termination_terms(terms_list) -> ExtractedTerminationTerms:
+    """First observed value per field; for-convenience is true if any page saw it."""
+    notice_days, cure_days = None, 0
+    for_convenience = False
+    for t in terms_list:
+        notice_days = notice_days if notice_days is not None else t.notice_period_days
+        cure_days = cure_days or t.cure_period_days
+        for_convenience = for_convenience or t.termination_for_convenience
+    return ExtractedTerminationTerms(
+        notice_period_days=notice_days,
+        cure_period_days=cure_days,
+        termination_for_convenience=for_convenience,
+    )
 
 
 def _merge_commercial_terms(terms_list) -> ExtractedCommercialTerms:

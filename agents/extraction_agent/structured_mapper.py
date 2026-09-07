@@ -32,6 +32,7 @@ def from_structured_record(
     source_media_type: str,
     source_content_base64: str,
     source_original_filename: Optional[str] = None,
+    extraction_trace: list[dict[str, Any]] | None = None,
 ) -> ContractCandidate:
     """Map one JSON or CSV record to the agent's candidate schema.
 
@@ -60,6 +61,7 @@ def from_structured_record(
             total_value_currency=(record.get("total_value_currency") or None),
             payment_terms=(record.get("payment_terms") or None),
         ),
+        extraction_trace=extraction_trace or [],
     )
 
 
