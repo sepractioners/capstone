@@ -2,162 +2,59 @@
 
 A complete guide to setting up the Contract Lifecycle Management Platform on your local machine.
 
-## Prerequisites
+## Quick Start
 
 ### macOS
-- **OS**: macOS 11+ (Intel or Apple Silicon)
-- **Disk Space**: ~10GB (for dependencies, models, and sample data)
-- **Internet**: Required for initial setup and model downloads
-- **Memory**: 8GB minimum (16GB recommended for running Ollama + web app simultaneously)
-
-### Linux
-- **OS**: Ubuntu 20.04+ or equivalent
-- **Disk Space**: ~10GB
-- **Internet**: Required for initial setup
-- **Memory**: 8GB minimum
+```bash
+bash scripts/setup-mac.sh       # Setup everything
+ollama serve                    # Start LLM (new terminal)
+bash scripts/run-mac.sh         # Start apps
+```
 
 ### Windows
-- Refer to `scripts/run-all.ps1` for Windows setup
-
-## Quick Start (macOS)
-
-```bash
-# 1. Clone or navigate to the repository
-cd capstone
-
-# 2. Run the automated setup script
-bash scripts/setup-mac.sh
-
-# 3. Start Ollama (in a new terminal)
-ollama serve
-
-# 4. Start all applications
-bash scripts/run-mac.sh
+```powershell
+.\scripts\setup-windows.ps1     # Setup everything
+ollama serve                    # Start LLM (new terminal)
+.\scripts\run-all.ps1           # Start apps
 ```
 
-That's it! The portal will be available at https://localhost:5173
+**That's it!** Portal available at https://localhost:5173
 
-## What the Setup Script Does
+## Prerequisites
 
-### 1. System Dependencies
-- Installs Homebrew (if needed)
-- Installs Python 3.12, Git, SQLite, OpenSSL
-- All via `brew install`
+See [system-requirements.toml](system-requirements.toml) for all dependencies and install commands.
 
-### 2. Python Environment
-- Installs `uv` (fast Python package manager)
-- Creates `.venv` virtual environment
-- Installs all Python dependencies across 7 workspace packages
-- Single `uv.lock` file ensures reproducible builds
+**Minimum:**
+- Python 3.12+
+- Git
+- SQLite
+- OpenSSL
+- ~10GB disk space
+- 8GB RAM (16GB recommended for Ollama + web app)
 
-### 3. HTTPS & TLS
-- Installs `mkcert` for local CA
-- Generates self-signed certificates for localhost
-- Enables HTTP/2 via Hypercorn
-- Certificates stored in `.certs/` (gitignored)
+## What the Setup Scripts Do
 
-### 4. Database
-- Initializes SQLite database at `capstone.db`
-- Creates schema for contracts, obligations, clauses
-- Sets up identity/tenant layer
-- Gitignored; created fresh per instance
+- ✅ Install system dependencies (Python, Git, SQLite, OpenSSL, mkcert, uv)
+- ✅ Create Python virtual environment and install packages
+- ✅ Generate HTTPS certificates for localhost
+- ✅ Initialize SQLite database
+- ✅ Create `.env` configuration file
+- ✅ Download sample CUAD contracts (optional)
+- ✅ Build RAG knowledge index
+- ✅ Install frontend dependencies (bun or npm)
+- ✅ Pull Ollama models (optional)
 
-### 5. Environment Configuration
-- Creates `.env` file with defaults:
-  - LLM provider: `ollama` (local, free), `anthropic` (cloud), or `openrouter` (cloud with API key)
-  - Embedding model: `nomic-embed-text:latest`
-  - Timeouts, retry counts, feature flags
-- User can edit `.env` to switch providers or tune behavior
+No manual steps needed - the scripts handle everything!
 
-### 6. Ollama Setup (Optional)
-- Checks for Ollama installation
-- Pulls required models:
-  - `gemma4:latest` — local LLM for extraction and analysis
-  - `nomic-embed-text:latest` — local embeddings for RAG
-- First pull may take 5-10 minutes depending on bandwidth
+## Manual Setup (if not using setup scripts)
 
-### 7. Sample Contracts
-- Downloads Kaggle CUAD subset (~500 contracts)
-- Stored in `synthetic_data_loader/data/`
-- Used for extraction accuracy evaluation and testing
+If you prefer to set things up manually, follow the detailed steps for your platform:
 
-### 8. RAG Knowledge Index
-- Builds hybrid retrieval store:
-  - **SQLite FTS5**: exact legal terms and headings
-  - **Embeddings**: semantic similarity over CUAD examples
-- Stored at `synthetic_data_loader/rag_knowledge.sqlite3`
-- Enables smart extraction guidance
+- **macOS**: See `scripts/setup-mac.sh` for exact commands
+- **Windows**: See `scripts/setup-windows.ps1` for exact commands
+- **Linux**: Create similar script based on macOS version (apt-get instead of brew)
 
-### 9. Frontend Setup
-- Installs Bun package manager (if available)
-- Installs React/Vite dependencies in `web/frontend/`
-- Enables dev server at https://localhost:5173
-
-## Detailed Setup Steps
-
-### For macOS
-
-```bash
-# 1. Install Homebrew (if not already installed)
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# 2. Install system dependencies
-brew install python@3.12 openssl sqlite3 git
-
-# 3. Install uv (Python package manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.cargo/bin:$PATH"
-
-# 4. Install mkcert for local HTTPS
-brew install mkcert
-mkcert -install
-mkdir -p .certs
-cd capstone
-mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem localhost 127.0.0.1 ::1
-
-# 5. Create Python virtual environment
-uv venv
-source .venv/bin/activate
-
-# 6. Install all dependencies
-uv sync --all-packages
-
-# 7. Initialize database
-python -m web.clm_web.db --init
-
-# 8. Create .env file (or copy .env.example)
-cp .env.example .env
-# Edit .env to set LLM provider if desired
-
-# 9. Build RAG index
-python -m extraction_agent.build_rag_index
-
-# 10. Install frontend dependencies (if bun is available)
-brew install bun  # or npm install -g bun
-cd web/frontend
-bun install
-cd ../..
-```
-
-### For Linux (Ubuntu)
-
-```bash
-# 1. Install system dependencies
-sudo apt-get update
-sudo apt-get install -y python3.12 python3-pip git sqlite3 libssl-dev
-
-# 2. Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.cargo/bin:$PATH"
-
-# 3. Install mkcert (or use openssl for self-signed certs)
-sudo apt-get install -y libnss3-tools
-curl -JL https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64 -o mkcert
-chmod +x mkcert
-sudo mv mkcert /usr/local/bin/
-
-# 4. Follow steps 4-10 from macOS above
-```
+Or just check [system-requirements.toml](system-requirements.toml) for all dependencies and run the setup scripts!
 
 ## Starting the Applications
 
@@ -269,6 +166,30 @@ PLANNER_MAX_STEPS=3                     # Max steps in plan-and-execute
 ```
 
 ## Troubleshooting
+
+### Windows-Specific Issues
+
+#### PowerShell ExecutionPolicy Error
+If you get "cannot be loaded because running scripts is disabled on this system":
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+# Then re-run the activation command: .\.venv\Scripts\Activate.ps1
+```
+
+#### System Dependencies Not Found
+If you get "command not found" for `mkcert`, `uv`, `bun`, or other tools:
+- Check [system-requirements.toml](system-requirements.toml) for your platform's install commands
+- Ensure the tool is installed and in PATH
+- For Chocolatey tools: restart PowerShell after install to refresh PATH
+- For command-line installers: may need to add to PATH manually
+
+#### bun not found (frontend dependencies)
+If bun is not available and you prefer npm:
+```powershell
+cd web\frontend
+npm install
+cd ..\..
+```
 
 ### Ollama Won't Start
 ```bash

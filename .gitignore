@@ -14,8 +14,15 @@ __pycache__/
 # Local databases and runtime artifacts
 *.sqlite3
 *.db
+*.log
+.run/
+.coverage
+coverage.xml
+htmlcov/
+synthetic_data_loader/data/
 platform_testing/reports/*
 !platform_testing/reports/.gitkeep
+synthetic_data_loader/data/cuad_vector_index.json
 
 # Frontend dependencies and build output
 node_modules/

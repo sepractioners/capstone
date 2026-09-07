@@ -6,7 +6,7 @@ dependencies = [
     "contract-lifecycle",
     "clm-mcp-server",
     "extraction-agent",
-    "dep:llm",
+    "any-llm-sdk[anthropic,ollama,openrouter]",
     "fastapi>=0.115",
     "hypercorn>=0.17",
     "PyJWT>=2.9",
