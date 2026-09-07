@@ -269,6 +269,44 @@ class Contract:
             raise InvariantViolation("A clause must belong to the current version")
         self.clauses.append(clause)
 
+    def record_extracted_terms(
+        self,
+        *,
+        key_dates: Optional[KeyDates] = None,
+        renewal_terms: Optional[RenewalTerms] = None,
+        termination_terms: Optional[TerminationTerms] = None,
+    ) -> None:
+        """Fold source-derived renewal / termination / key-date facts into the
+        aggregate during drafting.
+
+        Only fields still at their default are filled - a value a lifecycle
+        transition has already set (an execution date, a termination notice
+        deadline) is never overwritten. Like ``add_clause`` / ``add_party`` this
+        records no event: it captures facts read from the contract text, not a
+        lifecycle decision.
+        """
+        if self.lifecycle_status not in (
+            LifecycleStatus.INTAKE,
+            LifecycleStatus.DRAFTING,
+        ):
+            raise InvariantViolation("Extracted terms can only be recorded during intake or drafting")
+
+        if key_dates is not None:
+            current = self.key_dates
+            self.key_dates = KeyDates(
+                effective_date=current.effective_date or key_dates.effective_date,
+                execution_date=current.execution_date or key_dates.execution_date,
+                expiration_date=current.expiration_date or key_dates.expiration_date,
+                renewal_deadline=current.renewal_deadline or key_dates.renewal_deadline,
+                termination_notice_deadline=(
+                    current.termination_notice_deadline or key_dates.termination_notice_deadline
+                ),
+            )
+        if renewal_terms is not None and self.renewal_terms == RenewalTerms():
+            self.renewal_terms = renewal_terms
+        if termination_terms is not None and self.termination_terms == TerminationTerms():
+            self.termination_terms = termination_terms
+
     def submit_for_review(self, actor: Actor, correlation_id: str, now: Optional[datetime] = None) -> None:
         if self.current_version is None:
             raise InvariantViolation("Cannot submit for review without a drafted version")

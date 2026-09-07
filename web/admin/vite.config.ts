@@ -3,9 +3,6 @@ import react from "@vitejs/plugin-react";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// Reuse the repo's local mkcert certificate so the portal is served over the
-// same scheme as the API (https://localhost:8443). Falls back to http when the
-// certs are absent.
 const certDir = resolve(process.cwd(), "../../.certs");
 const keyPath = resolve(certDir, "localhost-key.pem");
 const certPath = resolve(certDir, "localhost.pem");
@@ -16,10 +13,5 @@ const https =
 
 export default defineConfig({
   plugins: [react()],
-  server: {
-    host: "localhost",
-    port: 5173,
-    strictPort: true,
-    https,
-  },
+  server: { host: "localhost", port: 5174, strictPort: true, https },
 });

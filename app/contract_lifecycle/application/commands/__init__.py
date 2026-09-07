@@ -9,6 +9,7 @@ from .create_amendment_command import CreateAmendmentCommand
 from .create_contract_command import CreateContractCommand
 from .execute_amendment_command import ExecuteAmendmentCommand
 from .mark_executed_command import MarkExecutedCommand
+from .record_contract_terms_command import RecordContractTermsCommand
 from .record_review_command import RecordReviewCommand
 from .record_signature_command import RecordSignatureCommand
 from .record_signature_failure_command import RecordSignatureFailureCommand
@@ -29,6 +30,7 @@ __all__ = [
     "CreateContractCommand",
     "ExecuteAmendmentCommand",
     "MarkExecutedCommand",
+    "RecordContractTermsCommand",
     "RecordReviewCommand",
     "RecordSignatureCommand",
     "RecordSignatureFailureCommand",

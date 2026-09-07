@@ -26,8 +26,10 @@ from contract_lifecycle.domain.exceptions import InvalidValueError
 from contract_lifecycle.domain.value_objects import Actor, ContractId, ContractNumber, ContractType, DocumentReference, Jurisdiction, LegalName, OrganizationalRole, PartyId, VersionNumber
 from contract_lifecycle.infrastructure.sqlite.contract_mapper import ContractMapper
 from extraction_agent.pipeline import run as run_extraction
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from query_agent.mcp_client import analyze_via_mcp
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from clm_mcp_server.dependencies import build_dependencies
@@ -35,6 +37,8 @@ from clm_mcp_server.ingest_contract_handler import ingest_contract
 from clm_mcp_server.ingest_payload import ContractCandidate
 
 from .db import WebDatabase
+from .agent_orchestrator import AgentOrchestrator
+from .agent_runs import AgentRunStore
 from .security import create_access_token, decode_access_token, hash_password, new_secret, verify_password
 from .settings import settings
 
@@ -45,6 +49,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "https://localhost:5173",
+        "http://localhost:5174",
+        "https://localhost:5174",
         "https://localhost:8443",
     ],
     allow_credentials=False,
@@ -53,7 +59,12 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 database = WebDatabase(settings.database_path)
-dependencies = build_dependencies(settings.database_path, authority_roles=frozenset({"legal-approver"}))
+agent_runs = AgentRunStore(database)
+agent_orchestrator = AgentOrchestrator(agent_runs, database)
+dependencies = build_dependencies(
+    settings.database_path,
+    authority_roles=frozenset({"legal-approver", "automated-import"}),
+)
 mapper = ContractMapper()
 
 
@@ -86,6 +97,12 @@ class ActionRequest(BaseModel):
 
 class AgentQueryRequest(BaseModel):
     question: str = Field(min_length=3, max_length=1000)
+    contract_id: str | None = None
+
+
+class AgentMessageRequest(BaseModel):
+    mode: str = Field(pattern="^analysis$")
+    text: str = Field(min_length=3, max_length=1000)
     contract_id: str | None = None
 
 
@@ -164,6 +181,12 @@ def _require_clause_role(claims: dict[str, Any], *roles: str) -> None:
     """Require a role allowed to manage or review clause templates."""
     if str(claims.get("role")) not in roles:
         raise HTTPException(status_code=403, detail="Clause template permission required")
+
+
+def _require_agent_admin(claims: dict[str, Any]) -> None:
+    """Restrict agent traces and persisted memory to organization administrators."""
+    if str(claims.get("role")) != "admin":
+        raise HTTPException(status_code=403, detail="Agent administration permission required")
 
 
 def _tenant_contract(contract_id: str, organization_id: str) -> dict[str, Any]:
@@ -280,14 +303,155 @@ def me(claims: dict[str, Any] = Depends(_bearer)) -> dict[str, Any]:
     return {"subject": claims.get("sub"), "organization_id": claims.get("org"), "role": claims.get("role"), "scope": claims.get("scope", "").split()}
 
 
-@app.post("/agent/query", status_code=501)
-def agent_query(request: AgentQueryRequest, claims: dict[str, Any] = Depends(_bearer)) -> dict[str, Any]:
-    """Reserve the query-agent boundary until the separate agent is implemented."""
+@app.post("/agent/query")
+async def agent_query(request: AgentQueryRequest, claims: dict[str, Any] = Depends(_bearer)) -> dict[str, Any]:
+    """Answer a tenant-scoped contract question with the query agent."""
     _require_scope(claims, "contracts:read")
-    raise HTTPException(
-        status_code=501,
-        detail="The query agent is not configured yet. Install and connect the separate query_agent package.",
+    organization_id = _require_org(claims)
+    if request.contract_id:
+        _tenant_contract(request.contract_id, organization_id)
+    try:
+        result = await analyze_via_mcp(
+            request.question,
+            organization_id,
+            request.contract_id,
+            str(settings.database_path),
+        )
+        result.pop("debug_trace", None)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Query agent unavailable: {type(exc).__name__}") from exc
+
+
+@app.post("/agent/conversations")
+def create_agent_conversation(claims: dict[str, Any] = Depends(_bearer)) -> dict[str, Any]:
+    """Create a tenant-owned conversation for agent chat messages."""
+    _require_scope(claims, "contracts:read")
+    return agent_runs.create_conversation(_require_org(claims), str(claims["sub"]))
+
+
+@app.post("/agent/conversations/{conversation_id}/messages", status_code=202)
+async def create_agent_message(
+    conversation_id: str, request: AgentMessageRequest, claims: dict[str, Any] = Depends(_bearer)
+) -> dict[str, str]:
+    """Queue an analysis message and return its replayable SSE stream URL."""
+    _require_scope(claims, "contracts:read")
+    organization_id = _require_org(claims)
+    if agent_runs.conversation_for_organization(conversation_id, organization_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if request.contract_id:
+        _tenant_contract(request.contract_id, organization_id)
+    run = agent_runs.create_message_and_run(conversation_id, organization_id, request.mode, request.text, None)
+    asyncio.create_task(
+        agent_orchestrator.execute_run(
+            run["run_id"], conversation_id, organization_id, "analysis",
+            text=request.text, contract_id=request.contract_id
+        )
     )
+    return {"run_id": run["run_id"], "stream_url": f"/agent/runs/{run['run_id']}/events"}
+
+
+@app.post("/agent/conversations/{conversation_id}/extractions", status_code=202)
+async def create_agent_extraction(
+    conversation_id: str,
+    file: UploadFile = File(...),
+    instruction: str = Form(""),
+    claims: dict[str, Any] = Depends(_bearer),
+) -> dict[str, str]:
+    """Queue an attachment-based extraction and return its SSE stream URL."""
+    _require_scope(claims, "contracts:ingest")
+    organization_id = _require_org(claims)
+    if agent_runs.conversation_for_organization(conversation_id, organization_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    suffix = Path(file.filename or "upload.bin").suffix.lower()
+    if suffix not in {".pdf", ".json", ".csv"}:
+        raise HTTPException(status_code=415, detail="Only PDF, JSON, and CSV files are supported")
+    with NamedTemporaryFile(suffix=suffix, delete=False) as temporary:
+        temporary.write(await file.read())
+        temporary_path = temporary.name
+    run = agent_runs.create_message_and_run(
+        conversation_id,
+        organization_id,
+        "extraction",
+        instruction,
+        {"filename": file.filename, "media_type": file.content_type},
+    )
+    asyncio.create_task(
+        agent_orchestrator.execute_run(
+            run["run_id"], conversation_id, organization_id, "extraction",
+            file_path=temporary_path, instruction=instruction
+        )
+    )
+    return {"run_id": run["run_id"], "stream_url": f"/agent/runs/{run['run_id']}/events"}
+
+
+@app.post("/agent/conversations/{conversation_id}/tasks", status_code=202)
+async def create_agent_task(
+    conversation_id: str,
+    text: str = Form(""),
+    file: UploadFile | None = File(None),
+    claims: dict[str, Any] = Depends(_bearer),
+) -> dict[str, str]:
+    """Queue a planned multi-step task (optionally with an attachment) over SSE."""
+    _require_scope(claims, "contracts:read")
+    organization_id = _require_org(claims)
+    if agent_runs.conversation_for_organization(conversation_id, organization_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not text.strip() and file is None:
+        raise HTTPException(status_code=422, detail="A task needs a message or an attachment")
+
+    attachment_path: str | None = None
+    attachment_meta: dict[str, Any] | None = None
+    if file is not None:
+        _require_scope(claims, "contracts:ingest")
+        suffix = Path(file.filename or "upload.bin").suffix.lower()
+        if suffix not in {".pdf", ".json", ".csv"}:
+            raise HTTPException(status_code=415, detail="Only PDF, JSON, and CSV files are supported")
+        with NamedTemporaryFile(suffix=suffix, delete=False) as temporary:
+            temporary.write(await file.read())
+            attachment_path = temporary.name
+        attachment_meta = {"filename": file.filename, "media_type": file.content_type}
+
+    run = agent_runs.create_message_and_run(
+        conversation_id, organization_id, "analysis", text or (file.filename if file else ""), attachment_meta
+    )
+    asyncio.create_task(
+        agent_orchestrator.execute_run(
+            run["run_id"], conversation_id, organization_id, "plan",
+            text=text, file_path=attachment_path, instruction=text
+        )
+    )
+    return {"run_id": run["run_id"], "stream_url": f"/agent/runs/{run['run_id']}/events"}
+
+
+@app.get("/agent/runs/{run_id}/events")
+async def stream_agent_run_events(run_id: str, request: Request, claims: dict[str, Any] = Depends(_bearer)) -> StreamingResponse:
+    """Replay persisted run events and stream new events until a terminal state."""
+    _require_scope(claims, "contracts:read")
+    organization_id = _require_org(claims)
+    if agent_runs.run_for_organization(run_id, organization_id) is None:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    try:
+        after_id = int(request.headers.get("last-event-id", "0"))
+    except ValueError:
+        after_id = 0
+
+    async def event_stream():
+        nonlocal after_id
+        while True:
+            events = agent_runs.events_after(run_id, after_id)
+            for event in events:
+                after_id = event["id"]
+                yield f"id: {event['id']}\nevent: {event['event_type']}\ndata: {json.dumps(event['payload'])}\n\n"
+            run = agent_runs.run_for_organization(run_id, organization_id)
+            if run and run["status"] in {"completed", "failed"}:
+                return
+            yield ": keep-alive\n\n"
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/contracts")
@@ -527,6 +691,57 @@ def get_contract(contract_id: str, claims: dict[str, Any] = Depends(_bearer)) ->
     return _tenant_contract(contract_id, _require_org(claims))
 
 
+@app.get("/agent-admin/extraction-traces")
+def list_extraction_traces(claims: dict[str, Any] = Depends(_bearer)) -> list[dict[str, Any]]:
+    """List safe extraction traces for the organization agent administrator."""
+    _require_scope(claims, "contracts:read")
+    _require_agent_admin(claims)
+    connection = database.connect()
+    try:
+        rows = connection.execute(
+            "SELECT e.contract_id, e.trace_json, e.created_at FROM extraction_traces e "
+            "JOIN contract_tenants t ON t.contract_id = e.contract_id "
+            "WHERE t.organization_id = ? ORDER BY e.created_at DESC",
+            (_require_org(claims),),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [
+        {"contract_id": row["contract_id"], "events": json.loads(row["trace_json"]), "created_at": row["created_at"]}
+        for row in rows
+    ]
+
+
+@app.get("/agent-admin/runs")
+def list_agent_runs(claims: dict[str, Any] = Depends(_bearer)) -> list[dict[str, Any]]:
+    """List safe, tenant-scoped agent runs for organization administrators."""
+    _require_scope(claims, "contracts:read")
+    _require_agent_admin(claims)
+    return agent_runs.list_runs(_require_org(claims))
+
+
+@app.get("/agent-admin/runs/{run_id}")
+def get_agent_run(run_id: str, claims: dict[str, Any] = Depends(_bearer)) -> dict[str, Any]:
+    """Return safe run events and persisted conversation memory for administrators."""
+    _require_scope(claims, "contracts:read")
+    _require_agent_admin(claims)
+    run = agent_runs.run_detail(run_id, _require_org(claims))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    return run
+
+
+@app.get("/agent-admin/runs/{run_id}/debug")
+def get_agent_run_debug(run_id: str, claims: dict[str, Any] = Depends(_bearer)) -> dict[str, Any]:
+    """Return the full per-step agent trace: system prompts, context, reasoning, retrieval, timing."""
+    _require_scope(claims, "contracts:read")
+    _require_agent_admin(claims)
+    organization_id = _require_org(claims)
+    if agent_runs.run_for_organization(run_id, organization_id) is None:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    return {"run_id": run_id, "steps": agent_runs.debug_trace(run_id, organization_id)}
+
+
 @app.get("/contracts/{contract_id}/source")
 def get_source(contract_id: str, claims: dict[str, Any] = Depends(_bearer)) -> dict[str, Any]:
     """Return metadata and base64 source bytes for a tenant contract."""
@@ -592,6 +807,10 @@ async def upload_contract(
             connection.execute(
                 "INSERT OR IGNORE INTO contract_tenants VALUES (?, ?, ?)",
                 (result["contract_id"], organization_id, _now()),
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO extraction_traces VALUES (?, ?, ?)",
+                (result["contract_id"], json.dumps(result.get("extraction_trace", [])), _now()),
             )
         connection.commit()
     finally:
@@ -673,6 +892,10 @@ def ingest(request: CandidateRequest, claims: dict[str, Any] = Depends(_bearer))
         connection.execute(
             "INSERT OR IGNORE INTO contract_tenants VALUES (?, ?, ?)",
             (result.contract_id, organization_id, _now()),
+        )
+        connection.execute(
+            "INSERT OR REPLACE INTO extraction_traces VALUES (?, ?, ?)",
+            (result.contract_id, json.dumps(result.extraction_trace), _now()),
         )
         connection.commit()
     finally:

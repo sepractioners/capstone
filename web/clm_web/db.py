@@ -101,8 +101,65 @@ class WebDatabase:
                 );
                 CREATE INDEX IF NOT EXISTS idx_clause_templates_org ON clause_templates(organization_id, status);
                 CREATE INDEX IF NOT EXISTS idx_clause_reviews_template ON clause_template_reviews(template_id);
+                CREATE TABLE IF NOT EXISTS extraction_traces (
+                    contract_id TEXT PRIMARY KEY,
+                    trace_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS agent_conversations (
+                    id TEXT PRIMARY KEY,
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    created_by TEXT NOT NULL REFERENCES users(id),
+                    title TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS agent_messages (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL REFERENCES agent_conversations(id),
+                    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                    mode TEXT NOT NULL CHECK (mode IN ('analysis', 'extraction')),
+                    text TEXT NOT NULL DEFAULT '',
+                    attachment_json TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS agent_runs (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL REFERENCES agent_conversations(id),
+                    message_id TEXT NOT NULL REFERENCES agent_messages(id),
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    mode TEXT NOT NULL CHECK (mode IN ('analysis', 'extraction')),
+                    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+                    result_json TEXT,
+                    error_json TEXT,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS agent_run_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL REFERENCES agent_runs(id),
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS agent_debug_traces (
+                    run_id TEXT PRIMARY KEY REFERENCES agent_runs(id),
+                    steps_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_conversations_org ON agent_conversations(organization_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation ON agent_messages(conversation_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_runs_org ON agent_runs(organization_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_run_events_run ON agent_run_events(run_id, id);
                 """
             )
+            # Additive migrations (SQLite raises OperationalError if the column exists).
+            for statement in (
+                "ALTER TABLE agent_conversations ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
+            ):
+                try:
+                    connection.execute(statement)
+                except sqlite3.OperationalError:
+                    pass
             now = datetime.now(timezone.utc).isoformat()
             builtins = (
                 ("global_confidentiality", "Confidentiality", "Protect confidential information.", "obligation", "Each party shall protect the other party's confidential information and use it only to perform this agreement."),

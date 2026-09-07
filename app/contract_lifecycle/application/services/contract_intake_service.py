@@ -9,7 +9,11 @@ from __future__ import annotations
 from ...domain.aggregates import Contract
 from ...domain.services import ContractNumberGenerator
 from ...domain.value_objects import ContractNumber
-from ..commands import AddContractVersionCommand, CreateContractCommand
+from ..commands import (
+    AddContractVersionCommand,
+    CreateContractCommand,
+    RecordContractTermsCommand,
+)
 from .application_service import ApplicationService
 
 
@@ -36,6 +40,19 @@ class ContractIntakeService(ApplicationService):
             actor=command.actor,
             correlation_id=command.correlation_id,
             parties=list(command.parties),
+        )
+        self._finish(contract, command)
+        return contract
+
+    def handle_record_terms(self, command: RecordContractTermsCommand) -> Contract:
+        contract = self._repository.get(command.contract_id)
+        if self._already_handled(command):
+            return contract
+
+        contract.record_extracted_terms(
+            key_dates=command.key_dates,
+            renewal_terms=command.renewal_terms,
+            termination_terms=command.termination_terms,
         )
         self._finish(contract, command)
         return contract

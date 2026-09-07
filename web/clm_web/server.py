@@ -14,7 +14,7 @@ from .api import app
 def main() -> None:
     """Serve the API over local TLS with Hypercorn HTTP/2 support."""
     config = Config()
-    config.bind = [os.environ.get("CLM_BIND", "localhost:8443")]
+    config.bind = os.environ.get("CLM_BIND", "127.0.0.1:8443,[::1]:8443").split(",")
     config.certfile = os.environ.get("CLM_CERTFILE", str(Path(".certs/localhost.pem")))
     config.keyfile = os.environ.get("CLM_KEYFILE", str(Path(".certs/localhost-key.pem")))
     config.alpn_protocols = ["h2", "http/1.1"]
