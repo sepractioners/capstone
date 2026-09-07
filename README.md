@@ -7,17 +7,22 @@ A local-first Contract Lifecycle Management platform that combines a domain-driv
 ### 1. Setup
 Run the setup script for your platform (see [SETUP.md](SETUP.md)):
 
-**macOS/Linux:**
+**macOS:**
 ```bash
 bash scripts/setup-mac.sh
 ```
 
-**Windows:**
+**Linux/Git Bash:**
+```bash
+bash scripts/setup-linux.sh
+```
+
+**Windows (PowerShell):**
 ```powershell
 .\scripts\setup-windows.ps1
 ```
 
-The script handles: Python env, dependencies, HTTPS certs, database, .env config, and RAG index.
+Each script handles: Python env, dependencies, HTTPS certs, database, .env config, and RAG index.
 
 ### 2. Seed Sample Data
 See [SEEDING.md](SEEDING.md) for downloading and indexing CUAD contracts and setting up the RAG knowledge base.
