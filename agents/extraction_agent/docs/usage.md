@@ -38,20 +38,27 @@ the extraction eval harness.
 ## Model Configuration
 
 All provider/model/timeout settings are resolved centrally by `agent_llm` from
-the repo-root `.env` (see [`.env.example`](../../../.env.example)). The shared
-defaults:
+the repo-root `.env` (see [`.env.example`](../../../.env.example)). Supported providers:
 
+**Anthropic (default)**:
 ```env
 LLM_PROVIDER=anthropic
 LLM_MODEL=claude-haiku-4-5-20251001
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-To point everything at a local (or LAN) Ollama model instead:
-
+**Ollama (local)**:
 ```env
 LLM_PROVIDER=ollama
 LLM_MODEL=gemma4:latest
 OLLAMA_HOST=http://192.168.1.172:11434
+```
+
+**OpenRouter (cloud, any model)**:
+```env
+LLM_PROVIDER=openrouter
+LLM_MODEL=meta-llama/llama-3.1-70b-instruct
+OPENROUTER_API_KEY=sk-or-...
 ```
 
 Override just this agent with `EXTRACTION_LLM_PROVIDER` / `EXTRACTION_LLM_MODEL`

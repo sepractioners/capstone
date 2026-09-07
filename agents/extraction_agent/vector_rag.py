@@ -24,7 +24,7 @@ UNCLASSIFIED = {
     "recommended_fields": ["contract_type", "key_dates", "clauses", "obligations", "commercial_terms", "signers"],
 }
 
-DEFAULT_INDEX_PATH = Path(os.environ.get("EXTRACTION_RAG_INDEX", "sythetic_data_loader/data/cuad_vector_index.json"))
+DEFAULT_INDEX_PATH = Path(os.environ.get("EXTRACTION_RAG_INDEX", "synthetic_data_loader/data/cuad_vector_index.json"))
 DEFAULT_EMBEDDING_URL = _EMBEDDING.url
 DEFAULT_EMBEDDING_MODEL = _EMBEDDING.model
 DEFAULT_TOP_K = max(1, int(os.environ.get("EXTRACTION_RAG_TOP_K", "3")))

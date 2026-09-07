@@ -1,0 +1,13 @@
+[project]
+name = "sythetic-data-loader"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "extraction-agent",
+    "kagglehub",
+]
+
+# Flat scripts, not an importable package - contributes dependencies to the
+# workspace but is run as `python sythetic_data_loader/<script>.py`.
+[tool.uv]
+package = false

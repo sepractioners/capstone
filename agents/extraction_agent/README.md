@@ -82,12 +82,12 @@ uv run python -m extraction_agent.build_rag_index
 ```
 
 `build_rag_index` reads `EXTRACTION_RAG_DATA_DIR`
-(default `sythetic_data_loader/data/cuad_subset`) and
+(default `synthetic_data_loader/data/cuad_subset`) and
 `EXTRACTION_RAG_KNOWLEDGE_PATH` (default the packaged `rag_knowledge.jsonl`),
 writes the JSON vector index at `EXTRACTION_RAG_INDEX`
-(default `sythetic_data_loader/data/cuad_vector_index.json`), and upserts the
+(default `synthetic_data_loader/data/cuad_vector_index.json`), and upserts the
 same records into the hybrid SQLite store at `EXTRACTION_RAG_DB`
-(default `sythetic_data_loader/rag_knowledge.sqlite3`).
+(default `synthetic_data_loader/rag_knowledge.sqlite3`).
 
 Additional datasets can be normalized into JSONL records with
 `python -m extraction_agent.import_rag_dataset <input> <output> --dataset <name>`
@@ -101,7 +101,7 @@ extraction code.
 
 ```powershell
 $env:EXTRACTION_RAG_ENABLED = "1"
-$env:EXTRACTION_RAG_DB = "sythetic_data_loader/rag_knowledge.sqlite3"
+$env:EXTRACTION_RAG_DB = "synthetic_data_loader/rag_knowledge.sqlite3"
 ```
 
 When `EXTRACTION_RAG_ENABLED` is not `1`, the PDF path skips retrieval and

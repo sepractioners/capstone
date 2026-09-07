@@ -238,7 +238,7 @@ def download_sample_data() -> bool:
     """Download CUAD sample contracts."""
     print(Color.step("Downloading sample contracts (CUAD subset)"))
 
-    data_dir = PROJECT_ROOT / "sythetic_data_loader" / "data"
+    data_dir = PROJECT_ROOT / "synthetic_data_loader" / "data"
     manifest = data_dir / "cuad_subset_manifest.txt"
 
     if manifest.exists():
@@ -249,7 +249,7 @@ def download_sample_data() -> bool:
         data_dir.mkdir(parents=True, exist_ok=True)
 
         result = subprocess.run(
-            "uv run python -m sythetic_data_loader.download_cuad_subset",
+            "uv run python -m synthetic_data_loader.download_cuad_subset",
             cwd=PROJECT_ROOT,
             shell=True,
             timeout=600,  # 10 minutes
@@ -270,7 +270,7 @@ def build_rag_index() -> bool:
     """Build RAG knowledge index."""
     print(Color.step("Building RAG knowledge index"))
 
-    rag_db = PROJECT_ROOT / "sythetic_data_loader" / "rag_knowledge.sqlite3"
+    rag_db = PROJECT_ROOT / "synthetic_data_loader" / "rag_knowledge.sqlite3"
     if rag_db.exists():
         print(Color.ok("RAG index already exists"))
         return True

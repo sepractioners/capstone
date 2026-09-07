@@ -1,0 +1,187 @@
+# System Requirements for Capstone
+# This is the single source of truth for all system-level dependencies.
+# Used by setup scripts to validate the environment and provide clear error messages.
+
+[metadata]
+project = "Capstone Contract Lifecycle Management"
+requires_python = ">=3.12"
+tested_platforms = ["macos-12+", "ubuntu-22.04+", "windows-11"]
+last_updated = "2026-09-07"
+
+# === REQUIRED SYSTEM DEPENDENCIES ===
+# These must be installed before running the setup script.
+
+[required]
+
+[required.python]
+version = ">=3.12"
+note = "Python runtime (3.11 ok, but 3.12+ recommended)"
+why = "Used by all packages; 3.12 has better performance"
+install = { macos = "brew install python@3.12", linux = "apt-get install python3.12", windows = "choco install python" }
+
+[required.git]
+version = ">=2.20"
+note = "Version control system"
+why = "Required for uv workspace resolution and local development"
+install = { macos = "brew install git", linux = "apt-get install git", windows = "choco install git" }
+
+[required.sqlite3]
+version = ">=3.35"
+note = "Relational database library (system package)"
+why = "Required by contract_lifecycle domain model and FastAPI backend (capstone.db)"
+install = { macos = "brew install sqlite3", linux = "apt-get install sqlite3 libsqlite3-dev", windows = "choco install sqlite" }
+
+[required.openssl]
+version = ">=3.0"
+note = "TLS/SSL library"
+why = "Required by Hypercorn (FastAPI web server), requests, and cryptography (PyJWT)"
+install = { macos = "brew install openssl@3", linux = "apt-get install libssl-dev", windows = "choco install openssl" }
+
+# === DEVELOPMENT TOOLS ===
+# Required for setup, development, and running the platform.
+
+[dev-tools]
+
+[dev-tools.uv]
+version = ">=0.5"
+note = "Fast Python package manager and workspace resolver"
+why = "Core dependency manager; replaces pip/venv for workspace management"
+install = { command = "curl -LsSf https://astral.sh/uv/install.sh | sh" }
+platforms = ["macos", "linux", "windows"]
+
+[dev-tools.mkcert]
+version = ">=1.4"
+note = "Local HTTPS certificate authority"
+why = "Generates self-signed certificates for localhost HTTPS (required by Hypercorn)"
+optional = false
+install = { macos = "brew install mkcert", linux = "see SETUP.md for manual install", windows = "choco install mkcert" }
+
+[dev-tools.bun]
+version = ">=1.0"
+note = "JavaScript runtime and package manager"
+why = "Installs and runs React/Vite frontend (web/frontend, web/admin)"
+optional = false
+install = { command = "curl -fsSL https://bun.sh/install | bash" }
+platforms = ["macos", "linux", "windows"]
+
+# === PLATFORM-SPECIFIC BUILD DEPENDENCIES ===
+# Only needed for compiling native Python extensions (numpy, faiss, etc.)
+
+[platform-specific.linux]
+note = "Ubuntu 22.04+ system packages needed for building C extensions"
+
+[platform-specific.linux."build-essential"]
+version = "*"
+why = "GCC, Make, and build tools for compiling native extensions"
+
+[platform-specific.linux."python3-dev"]
+version = "*"
+why = "Python development headers for native modules"
+
+[platform-specific.linux."libssl-dev"]
+version = "*"
+why = "OpenSSL development library (for cryptography module)"
+
+[platform-specific.macos]
+note = "macOS Homebrew automatically installs build tools (Xcode CLT)"
+install = "xcode-select --install"
+
+[platform-specific.windows]
+note = "Windows 11: Microsoft C++ Build Tools or Visual Studio Community (with Python workload)"
+install = "https://visualstudio.microsoft.com/vs/community/"
+
+# === OPTIONAL SYSTEM DEPENDENCIES ===
+# Only needed for specific features (not core functionality)
+
+[optional-features]
+
+[optional-features.ollama]
+version = ">=0.3"
+note = "Local LLM inference engine"
+why = "Runs local LLM models (gemma4) and embeddings (nomic-embed-text) for extraction"
+default_lm = "gemma4:latest"
+default_embed = "nomic-embed-text:latest"
+disk_space_needed = "~10GB"
+install = { website = "https://ollama.ai/download" }
+note_if_skipped = "Set LLM_PROVIDER=anthropic in .env instead"
+
+[optional-features.docker]
+version = ">=24.0"
+note = "Container runtime"
+why = "Alternative to local setup; run all services in containers"
+install = { website = "https://www.docker.com/products/docker-desktop" }
+
+[optional-features.postgresql]
+version = ">=14"
+note = "Relational database (production alternative to SQLite)"
+why = "For production deployments; SQLite is fine for local/test"
+install = { macos = "brew install postgresql@14", linux = "apt-get install postgresql-14" }
+
+# === VERSION CONSTRAINTS & KNOWN ISSUES ===
+
+[constraints]
+
+[constraints.python-3-11]
+note = "Python 3.11 works but not tested; upgrade to 3.12+ recommended"
+reason = "3.12 has better performance; some new features used in agents"
+
+[constraints.numpy]
+version = "<2"
+why = "faiss-cpu requires older NumPy; newer versions have breaking changes"
+packages = ["faiss-cpu"]
+
+[constraints.windows-11]
+note = "Windows 10 or older not supported"
+reason = "We use modern PowerShell 7+ features and Windows Terminal features"
+
+[constraints.macos-10-15]
+note = "macOS 11+ required (Intel or Apple Silicon)"
+reason = "Older macOS versions have outdated system libraries"
+
+# === VALIDATION CHECKLIST ===
+# Run this before setup:
+
+[validation]
+checklist = [
+  "python --version             # Should be >=3.12",
+  "git --version                # Should be >=2.20",
+  "sqlite3 --version            # Should be >=3.35",
+  "openssl version              # Should be >=3.0",
+  "uv --version                 # Should be >=0.5",
+  "mkcert -version              # Should be >=1.4",
+  "bun --version                # Should be >=1.0",
+]
+
+skip_if_docker = "All checks skipped when running in Docker container"
+
+# === INSTALLATION REFERENCE ===
+
+[install-reference]
+
+quick_macos = """
+# One-liner for macOS:
+brew install python@3.12 git openssl@3 sqlite3 mkcert && \\
+curl -LsSf https://astral.sh/uv/install.sh | sh && \\
+curl -fsSL https://bun.sh/install | bash
+"""
+
+quick_ubuntu = """
+# For Ubuntu 22.04+:
+sudo apt-get update && sudo apt-get install -y \\
+  python3.12 git sqlite3 libssl-dev libsqlite3-dev \\
+  build-essential python3-dev && \\
+curl -LsSf https://astral.sh/uv/install.sh | sh && \\
+curl -JL https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64 -o mkcert && \\
+chmod +x mkcert && sudo mv mkcert /usr/local/bin/ && \\
+curl -fsSL https://bun.sh/install | bash
+"""
+
+quick_windows = """
+# For Windows 11 (using Chocolatey):
+choco install python openssl git sqlite mkcert && ^
+curl -LsSf https://astral.sh/uv/install.sh | sh && ^
+curl -fsSL https://bun.sh/install | bash
+"""
+
+# Fallback for systems without package managers:
+fallback = "See SETUP.md for manual installation instructions"

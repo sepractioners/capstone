@@ -1,0 +1,62 @@
+[project]
+name = "capstone"
+version = "0.1.0"
+description = "Local-first Contract Lifecycle Management platform (uv workspace root)"
+requires-python = ">=3.11"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "app",
+    "mcp",
+    "agents",
+    "web",
+    "platform_testing",
+    "tools/contract_calc",
+    "tools/clm_agent_cli",
+    "synthetic_data_loader",
+]
+
+# Internal packages resolve to their in-tree source, not PyPI.
+[tool.uv.sources]
+contract-lifecycle = { workspace = true }
+clm-mcp-server = { workspace = true }
+extraction-agent = { workspace = true }
+clm-web = { workspace = true }
+contract-calc = { workspace = true }
+clm-agent-cli = { workspace = true }
+clm-platform-testing = { workspace = true }
+synthetic-data-loader = { workspace = true }
+
+[dependency-groups]
+# Shared dependencies across workspace packages
+dev = ["pytest>=8"]
+
+# LLM provider support - shared by extraction-agent, platform_testing, clm-web
+llm = ["any-llm-sdk[anthropic,ollama,openrouter]"]
+
+# RAG retrieval for extraction - shared by agents/extraction_agent
+rag = ["faiss-cpu>=1.8", "numpy<2"]
+
+# Configuration management - used by multiple agents
+config = ["pyyaml>=6", "python-dotenv>=1.0"]
+
+# Evaluation and platform testing
+eval = ["dep:llm", "clm-platform-testing"]
+
+# Full setup: everything needed for development, testing, and RAG
+all = ["dep:dev", "dep:llm", "dep:rag", "dep:config", "dep:eval"]
+
+[tool.pytest.ini_options]
+# importlib mode lets several packages each keep a `tests/` dir without the
+# module-name collision that blocks a single collection run.
+addopts = "--import-mode=importlib"
+testpaths = [
+    "app/contract_lifecycle/tests",
+    "mcp/tests",
+    "agents/tests",
+    "web/tests",
+    "platform_testing/tests",
+]

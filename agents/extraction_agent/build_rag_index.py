@@ -13,8 +13,8 @@ from .faiss_backend import build_index as build_faiss_index
 
 
 if __name__ == "__main__":
-    data_dir = Path(os.environ.get("EXTRACTION_RAG_DATA_DIR", "sythetic_data_loader/data/cuad_subset"))
+    data_dir = Path(os.environ.get("EXTRACTION_RAG_DATA_DIR", "synthetic_data_loader/data/cuad_subset"))
     knowledge_path = Path(os.environ.get("EXTRACTION_RAG_KNOWLEDGE_PATH", Path(__file__).parent / "rag_knowledge.jsonl"))
     print(build_index(data_dir, DEFAULT_INDEX_PATH, knowledge_path))
     if os.environ.get("EXTRACTION_RAG_BUILD_FAISS", "0") == "1":
-        print(build_faiss_index(os.environ.get("EXTRACTION_RAG_DB", "sythetic_data_loader/rag_knowledge.sqlite3")))
+        print(build_faiss_index(os.environ.get("EXTRACTION_RAG_DB", "synthetic_data_loader/rag_knowledge.sqlite3")))

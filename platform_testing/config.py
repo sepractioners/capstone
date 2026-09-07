@@ -1,24 +1,24 @@
-"""Environment-file configuration for platform scenario evaluation."""
+"""Scenario-evaluation config. LLM provider details come from ``agent_llm``."""
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
-from dotenv import load_dotenv
+from agent_llm import settings_for
 
-
-load_dotenv(Path(__file__).parent / ".env")
+_llm = settings_for("platform")
 
 
 @dataclass(frozen=True)
 class EvaluationConfig:
-    """Provider-neutral any-llm configuration from ``platform_testing/.env``."""
-
-    provider: str = os.environ.get("PLATFORM_LLM_PROVIDER", "ollama")
-    model: str = os.environ.get("PLATFORM_LLM_MODEL", "gemma4:latest")
-    temperature: float = float(os.environ.get("PLATFORM_LLM_TEMPERATURE", "0"))
-    api_key: str | None = os.environ.get("PLATFORM_LLM_API_KEY")
+    provider: str = _llm.provider
+    model: str = _llm.model
+    temperature: float = _llm.temperature
+    api_key: str | None = (
+        os.environ.get("PLATFORM_LLM_API_KEY")
+        or os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+    )
 
 
 config = EvaluationConfig()

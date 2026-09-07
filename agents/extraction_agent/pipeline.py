@@ -1,4 +1,4 @@
-"""The single entry point the driver script (sythetic_data_loader) calls:
+"""The single entry point the driver script (synthetic_data_loader) calls:
 run one file through load -> extract -> ingest and get back the MCP
 server's IngestResult(s) for it (a CSV/JSON file can yield more than one).
 """

@@ -16,7 +16,7 @@ from typing import Any, Iterable
 from agent_llm import EMBEDDING as _EMBEDDING
 from agent_llm.embeddings import embed as _shared_embed
 
-DEFAULT_DB_PATH = Path(os.environ.get("EXTRACTION_RAG_DB", "sythetic_data_loader/rag_knowledge.sqlite3"))
+DEFAULT_DB_PATH = Path(os.environ.get("EXTRACTION_RAG_DB", "synthetic_data_loader/rag_knowledge.sqlite3"))
 EMBEDDING_URL = _EMBEDDING.url
 EMBEDDING_MODEL = _EMBEDDING.model
 TOP_K = max(1, int(os.environ.get("EXTRACTION_RAG_TOP_K", "5")))

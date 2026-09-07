@@ -15,6 +15,12 @@ configures the whole workspace.
 Resolution order for any role: ``<ROLE>_LLM_MODEL`` -> ``LLM_MODEL`` (a global
 override) -> a per-role built-in default. So setting ``LLM_PROVIDER`` +
 ``LLM_MODEL`` once points every agent at the same backend.
+
+Supported providers (via any-llm-sdk):
+- ``ollama`` — local LLM (free, requires Ollama installation)
+- ``anthropic`` — Claude models (requires ANTHROPIC_API_KEY)
+- ``openrouter`` — OpenRouter proxy (requires OPENROUTER_API_KEY)
+- Other any-llm providers: openai, groq, etc. (may require additional setup)
 """
 from __future__ import annotations
 

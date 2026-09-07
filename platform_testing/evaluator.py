@@ -5,11 +5,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from any_llm import completion
 import yaml
+from agent_llm import settings_for
+from any_llm import completion
 
 from .config import config
-
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "gemma_evaluation.yaml"
 
@@ -23,14 +23,18 @@ def evaluate(trace: dict[str, Any]) -> dict[str, Any]:
 
         os.environ.setdefault("ANTHROPIC_API_KEY", config.api_key)
         os.environ.setdefault("OPENAI_API_KEY", config.api_key)
+
+    settings = settings_for("platform")
+    kwargs: dict[str, Any] = {"api_base": settings.api_base} if settings.api_base else {}
     response = completion(
-        model=config.model,
-        provider=config.provider,
+        model=settings.model,
+        provider=settings.provider,
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": f"SCENARIO TRACE:\n{json.dumps(trace, indent=2, default=str)}"},
         ],
-        temperature=config.temperature,
+        temperature=settings.temperature,
         response_format={"type": "json_object"},
+        **kwargs,
     )
     return json.loads(response.choices[0].message.content)

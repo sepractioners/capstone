@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-DEFAULT_INDEX_PATH = Path(os.environ.get("EXTRACTION_RAG_FAISS_INDEX", "sythetic_data_loader/rag_knowledge.faiss"))
+DEFAULT_INDEX_PATH = Path(os.environ.get("EXTRACTION_RAG_FAISS_INDEX", "synthetic_data_loader/rag_knowledge.faiss"))
 DEFAULT_METADATA_PATH = DEFAULT_INDEX_PATH.with_suffix(".metadata.json")
 
 
