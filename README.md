@@ -48,6 +48,38 @@ Access:
 
 **Login**: `admin@capstone.local` / `CapstoneAdmin!2026`
 
+## Platform Demo
+
+### 1. Portal Dashboard
+After login, you access the contract workspace dashboard showing:
+- **120 visible contracts** in the system
+- **9 contracts needing review** 
+- **94 active contracts** across all statuses
+- Recent agreements list for quick access
+- Action buttons: "Upload contract", "Create draft", "Open agent"
+
+### 2. Contract Agent Interaction
+The platform includes an intelligent agent that can:
+- **Answer contract questions**: "Which contracts need review and what are their key terms?"
+- **Analyze contracts**: Extract key terms, obligations, and dates
+- **Compare agreements**: Find similarities and differences across contracts
+- **Identify risks**: Flag unusual terms or missing standard clauses
+- **Generate insights**: Provide summaries and recommendations
+
+The agent uses:
+- **Hybrid RAG** (CUAD knowledge base + semantic search) for guidance
+- **LangGraph orchestration** for multi-step reasoning
+- **Real-time streaming** of analysis via SSE
+- **MCP boundaries** ensuring safe, audited access to contract data
+
+### 3. Key Features
+✅ **Tenant-scoped portal** - Multi-tenant access with role-based controls  
+✅ **Contract extraction** - Upload PDFs, extract clauses automatically  
+✅ **Agent workspace** - Chat interface for contract analysis  
+✅ **Admin observability** - Full trace logs of agent reasoning  
+✅ **Local-first** - All processing stays on your infrastructure  
+✅ **HTTPS by default** - Self-signed certs for secure local dev  
+
 ## Component Architecture
 
 The platform enforces **strict isolation** between the agentic and domain layers across **three core components**:
