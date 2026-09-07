@@ -50,35 +50,20 @@ Access:
 
 ## Platform Demo
 
-### 1. Portal Dashboard
-After login, you access the contract workspace dashboard showing:
-- **120 visible contracts** in the system
-- **9 contracts needing review** 
-- **94 active contracts** across all statuses
-- Recent agreements list for quick access
-- Action buttons: "Upload contract", "Create draft", "Open agent"
+See **[DEMO.md](DEMO.md)** for a complete walkthrough with:
+- Login and authentication flow
+- Portal dashboard overview with contract metrics  
+- Contract agent workspace and multi-turn interactions
+- Admin console with execution traces
+- Example workflows (upload, extraction, analysis)
+- Technical stack overview
 
-### 2. Contract Agent Interaction
-The platform includes an intelligent agent that can:
-- **Answer contract questions**: "Which contracts need review and what are their key terms?"
-- **Analyze contracts**: Extract key terms, obligations, and dates
-- **Compare agreements**: Find similarities and differences across contracts
-- **Identify risks**: Flag unusual terms or missing standard clauses
-- **Generate insights**: Provide summaries and recommendations
-
-The agent uses:
-- **Hybrid RAG** (CUAD knowledge base + semantic search) for guidance
-- **LangGraph orchestration** for multi-step reasoning
-- **Real-time streaming** of analysis via SSE
-- **MCP boundaries** ensuring safe, audited access to contract data
-
-### 3. Key Features
-✅ **Tenant-scoped portal** - Multi-tenant access with role-based controls  
-✅ **Contract extraction** - Upload PDFs, extract clauses automatically  
-✅ **Agent workspace** - Chat interface for contract analysis  
-✅ **Admin observability** - Full trace logs of agent reasoning  
-✅ **Local-first** - All processing stays on your infrastructure  
-✅ **HTTPS by default** - Self-signed certs for secure local dev  
+**Quick highlights:**
+- 📊 **Dashboard**: Shows 120 contracts, 9 pending review, 94 active
+- 🤖 **Agent**: Ask questions about contracts, extract terms, identify risks
+- 📋 **Extraction**: Upload PDFs, auto-extract clauses and obligations
+- 🔍 **Analysis**: Compare contracts, flag missing terms, assess compliance
+- 📝 **Admin Console**: Full audit trail of agent reasoning and decisions  
 
 ## Component Architecture
 
