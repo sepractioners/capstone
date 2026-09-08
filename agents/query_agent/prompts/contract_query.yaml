@@ -107,8 +107,8 @@ examples:
             - VA-2024-001: "Liability capped at annual value"
             - VA-2024-002: "Liability limited to $500,000"
       - evidence:
-          - contract_id: VA-2024-001, label: "clause_89", text: "...liability shall not exceed..."
-          - contract_id: VA-2024-002, label: "clause_156", text: "...$500,000 cap..."
+          - {contract_id: VA-2024-001, label: "clause_89", text: "...liability shall not exceed..."}
+          - {contract_id: VA-2024-002, label: "clause_156", text: "...$500,000 cap..."}
 
     answer: |
       **18 contracts** contain explicit liability limits.

@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from agent_llm import settings_for
+from agent_llm import prompts, settings_for
 from agent_llm.client import acall_retrying
 
 from .schema import PageExtraction
@@ -23,33 +23,7 @@ LLM_RETRY_BACKOFF_SECONDS = max(0.0, float(os.environ.get("EXTRACTION_LLM_RETRY_
 
 logger = logging.getLogger(__name__)
 
-def _load_system_prompt() -> str:
-    """Compose the PDF extraction prompt from the package YAML resource."""
-    import yaml
-
-    prompt_path = Path(__file__).with_name("system_prompt.yaml")
-    with prompt_path.open(encoding="utf-8") as prompt_file:
-        spec = yaml.safe_load(prompt_file)
-    if not isinstance(spec, dict) or not isinstance(spec.get("persona"), str):
-        raise ValueError(f"Invalid extraction prompt file: {prompt_path}")
-
-    sections = [spec["persona"].strip()]
-    for key in ("goals", "constraints", "instructions", "verification"):
-        items = spec.get(key) or []
-        if items:
-            bullets = "\n".join(f"- {item}" for item in items)
-            sections.append(f"{key.replace('_', ' ').capitalize()}:\n{bullets}")
-    tasks = spec.get("extraction_tasks") or {}
-    if tasks:
-        blocks = "\n\n".join(f"{name}:\n{body.strip()}" for name, body in tasks.items())
-        sections.append(f"Extraction tasks:\n\n{blocks}")
-    for key in ("example_input", "example_output"):
-        if spec.get(key):
-            sections.append(f"{key.replace('_', ' ').capitalize()}:\n{spec[key].strip()}")
-    return "\n\n".join(sections)
-
-
-_SYSTEM_PROMPT = _load_system_prompt()
+_SYSTEM_PROMPT = prompts.load(Path(__file__).with_name("system_prompt.yaml"))
 
 
 def _memory_context(memory: dict[str, Any] | None) -> str:

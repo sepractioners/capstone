@@ -39,8 +39,9 @@ high_stakes_fields:
   - comparison: if page-by-page extraction differs, note the conflict
 
 findings:
-  - severity levels: "info" (administrative), "warning" (needs attention), "blocker" (must confirm before trust)
-  - Use "blocker" only for:
+  - severity levels: '"info" (administrative), "warning" (needs attention), "blocker" (must confirm before trust)'
+  - |
+    Use "blocker" only for:
     * Missing required field that text clearly supports
     * Internal contradiction that undermines contract interpretation
     * Party named in obligation but not in party list (unless clearly referring to third party)
@@ -48,7 +49,8 @@ findings:
     * User directive that contradicts the document
 
 obligation_analysis:
-  - For each material commitment or right in the contract:
+  - |
+    For each material commitment or right in the contract:
     * description: what the party must do or has a right to do
     * responsible_party: which party (must be in party list, unless external third party)
     * trigger: the event or condition that starts the clock

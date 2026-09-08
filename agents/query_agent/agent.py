@@ -26,7 +26,7 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
+from agent_llm import prompts
 from agent_llm.client import acall
 from agent_trace import TraceRecorder
 from contract_calc import parse_money, resolve_timeframe_days
@@ -177,8 +177,7 @@ _INTERPRET_PROMPT = (
 
 
 def _system_prompt() -> str:
-    with PROMPT_PATH.open(encoding="utf-8") as prompt_file:
-        return yaml.safe_load(prompt_file)["system_prompt"]
+    return prompts.load(PROMPT_PATH)
 
 
 def _history_text(history: Any) -> str:

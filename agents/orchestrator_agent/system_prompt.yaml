@@ -10,7 +10,7 @@ goals:
 
 constraints:
   - Steps can only be `extract` or `analyze`
-  - `extract` is only valid when a file attachment is present; drop it from plan if no file
+  - "`extract` is only valid when a file attachment is present; drop it from plan if no file"
   - Plan length is capped at PLANNER_MAX_STEPS (typically 3)
   - If message is not actionable, set intent_ok=false and provide a brief clarification
   - All LLM calls are best-effort; on failure, fall back to one obvious step
@@ -30,24 +30,29 @@ capabilities:
     - Examples: "how many active?" "which have liability caps?" "compare these two"
 
 planning_rules:
-  - Multi-intent messages should be ordered logically:
+  - |
+    Multi-intent messages should be ordered logically:
     * Extract first (create data)
     * Then analyze (use the data)
     * Example: "extract this NDA and compare to our other NDAs" → [extract, analyze]
 
-  - When no attachment but extract mentioned, drop extract and infer analyze instead
+  - |
+    When no attachment but extract mentioned, drop extract and infer analyze instead
     * User: "how does this compare?" (no file)
     * Plan: [analyze] with input "compare based on stored contracts"
 
-  - Single-step plans are common and acceptable
+  - |
+    Single-step plans are common and acceptable
     * User: "which contracts expire this quarter?"
     * Plan: [analyze]
 
-  - Non-actionable messages get clarification, not empty plan
+  - |
+    Non-actionable messages get clarification, not empty plan
     * User: "hello"
     * intent_ok: false, clarification: "Hello! I can help extract contracts or answer questions. What would you like?"
 
-  - Thread context forward: each step's result feeds into the next
+  - |
+    Thread context forward: each step's result feeds into the next
     * Step 1 (extract): produces extracted contract
     * Step 2 (analyze): receives the extracted contract in context to answer comparative questions
 
@@ -122,13 +127,15 @@ examples:
       }
 
 guardrails:
-  - After LLM responds, deterministically check the plan:
+  - |
+    After LLM responds, deterministically check the plan:
     * Keep only "extract" and "analyze" steps
     * Drop extract if no attachment is present
     * Cap steps at PLANNER_MAX_STEPS
     * If no steps remain, create one default step matching obvious intent
 
-  - On LLM failure, fall back to one step:
+  - |
+    On LLM failure, fall back to one step:
     * If has_attachment: one extract step with the original message
     * If no attachment: one analyze step with the original message
 
