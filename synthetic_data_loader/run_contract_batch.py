@@ -129,7 +129,7 @@ def run_batch(data_dir: Path, output: Path, log_path: Path, limit: int, database
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("sythetic_data_loader/data/cuad_subset"))
+    parser.add_argument("--data-dir", type=Path, default=Path("synthetic_data_loader/data/cuad_subset"))
     parser.add_argument("--output", type=Path, default=Path("platform_testing/reports/kaggle_contracts.jsonl"))
     parser.add_argument("--log", type=Path, default=DEFAULT_LOG)
     parser.add_argument("--limit", type=int, default=200)

@@ -11,27 +11,27 @@ The download script reads these categories by default:
 - `Affiliate_Agreements`
 - `Co_Branding`
 
-The script copies the selected files from the dataset's `CUAD_v1/full_contract_pdf/Part_I/` tree into `sythetic_data_loader/data/cuad_subset/`. The dataset itself is downloaded and cached by `kagglehub`; only the selected PDFs are copied into this repository's working data directory.
+The script copies the selected files from the dataset's `CUAD_v1/full_contract_pdf/Part_I/` tree into `synthetic_data_loader/data/cuad_subset/`. The dataset itself is downloaded and cached by `kagglehub`; only the selected PDFs are copied into this repository's working data directory.
 
 ## Download the Test PDFs
 
 `uv sync --all-packages` already installs `kagglehub` (via the
-`sythetic-data-loader` workspace member). Download the default categories:
+`synthetic-data-loader` workspace member). Download the default categories:
 
 ```powershell
-uv run python .\sythetic_data_loader\download_cuad_subset.py
+uv run python .\synthetic_data_loader\download_cuad_subset.py
 ```
 
 To download different CUAD categories, pass their directory names as arguments:
 
 ```powershell
-uv run python .\sythetic_data_loader\download_cuad_subset.py Affiliate_Agreements Co_Branding
+uv run python .\synthetic_data_loader\download_cuad_subset.py Affiliate_Agreements Co_Branding
 ```
 
 To copy every available CUAD PDF category locally:
 
 ```powershell
-uv run python .\sythetic_data_loader\download_cuad_subset.py --all
+uv run python .\synthetic_data_loader\download_cuad_subset.py --all
 ```
 
 After downloading the full local set, build the reusable vector index with
@@ -58,7 +58,7 @@ If Kaggle authentication is required in the local environment, configure Kaggle 
 Start with a small run to verify the environment, model provider, MCP subprocess, and SQLite persistence:
 
 ```powershell
-uv run python .\sythetic_data_loader\run_pipeline.py --limit 3
+uv run python .\synthetic_data_loader\run_pipeline.py --limit 3
 ```
 
 The batch driver then performs this complete path for each selected PDF:
@@ -73,14 +73,14 @@ The batch driver then performs this complete path for each selected PDF:
 To process every downloaded PDF:
 
 ```powershell
-uv run python .\sythetic_data_loader\run_pipeline.py
+uv run python .\synthetic_data_loader\run_pipeline.py
 ```
 
 By default, the batch database is written to the shared repository database `clm.sqlite3`, which is also used by the web portal. Use `--database-path` to select another SQLite file and `--data-dir` to process a different directory:
 
 ```powershell
-uv run python .\sythetic_data_loader\run_pipeline.py `
-  --data-dir .\sythetic_data_loader\data\cuad_subset `
+uv run python .\synthetic_data_loader\run_pipeline.py `
+  --data-dir .\synthetic_data_loader\data\cuad_subset `
   --database-path .\clm.sqlite3 `
   --organization-id org_177e99f3478a46c99df4a3d9ddd3ec1d `
   --limit 3

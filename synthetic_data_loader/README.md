@@ -12,8 +12,8 @@ local organization so it shows in the portal. All text is ASCII. Idempotent per
 `--seed` value.
 
 ```powershell
-uv run python sythetic_data_loader\seed_contracts.py --count 120
-uv run python sythetic_data_loader\seed_contracts.py --count 120 --reset   # replace an earlier batch
+uv run python synthetic_data_loader\seed_contracts.py --count 120
+uv run python synthetic_data_loader\seed_contracts.py --count 120 --reset   # replace an earlier batch
 ```
 
 Produces a realistic lifecycle spread (most `active`, some `approved`, a few
@@ -24,8 +24,8 @@ To run complete-contract extraction with resumable JSONL checkpoints and
 Markdown logging:
 
 ```powershell
-uv run python .\sythetic_data_loader\download_cuad_subset.py --all --limit 198
-uv run python .\sythetic_data_loader\run_contract_batch.py --limit 198
+uv run python .\synthetic_data_loader\download_cuad_subset.py --all --limit 198
+uv run python .\synthetic_data_loader\run_contract_batch.py --limit 198
 ```
 
 The current CUAD snapshot contains 198 unique PDFs. The runner logs every

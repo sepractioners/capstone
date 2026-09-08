@@ -25,7 +25,7 @@ from typing import Any
 from extraction_agent.pipeline import acandidates
 
 FIELDS = ("title", "parties", "contract_type", "effective_date", "expiration_date", "clause_count")
-DEFAULT_DATA_DIR = Path("sythetic_data_loader/data/cuad_subset")
+DEFAULT_DATA_DIR = Path("synthetic_data_loader/data/cuad_subset")
 DEFAULT_TRUTH = Path(__file__).parent / "fixtures" / "cuad_ground_truth.jsonl"
 REPORT_DIR = Path(__file__).parent / "reports"
 

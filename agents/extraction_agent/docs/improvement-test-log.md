@@ -229,7 +229,7 @@ exports, LEDGAR-style clause records, and ContractNLI-style context records.
 
 ### Runner
 
-`sythetic_data_loader/run_contract_batch.py` invokes the real extraction agent
+`synthetic_data_loader/run_contract_batch.py` invokes the real extraction agent
 once per complete PDF and appends both:
 
 - JSONL checkpoint records under `platform_testing/reports/`
@@ -241,7 +241,7 @@ does not treat a slow local LLM as a corpus-level failure.
 Run the available corpus with:
 
 ```powershell
-uv run python .\sythetic_data_loader\run_contract_batch.py --limit 198
+uv run python .\synthetic_data_loader\run_contract_batch.py --limit 198
 ```
 
 ### Setup Validation

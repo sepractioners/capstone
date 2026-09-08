@@ -20,7 +20,7 @@ members = [
     "contract-calc",
     "contract-lifecycle",
     "extraction-agent",
-    "sythetic-data-loader",
+    "synthetic-data-loader",
 ]
 
 [[package]]
@@ -3166,7 +3166,7 @@ wheels = [
 ]
 
 [[package]]
-name = "sythetic-data-loader"
+name = "synthetic-data-loader"
 version = "0.1.0"
 source = { virtual = "synthetic_data_loader" }
 dependencies = [

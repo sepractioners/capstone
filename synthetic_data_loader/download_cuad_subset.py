@@ -1,6 +1,6 @@
 """Downloads the CUAD (Contract Understanding Atticus Dataset) via
 kagglehub and copies a chosen category subset's PDFs into
-sythetic_data_loader/data/cuad_subset/ for the extraction pipeline to
+synthetic_data_loader/data/cuad_subset/ for the extraction pipeline to
 process.
 
 The full dataset is ~107MB and downloads as one unit regardless of which

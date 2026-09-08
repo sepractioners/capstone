@@ -29,7 +29,7 @@ The project uses a **uv workspace** with 8 member packages:
 - `platform_testing` — YAML scenario runner + evaluator (clm-platform-testing)
 - `tools/contract_calc` — contract calculations (contract-calc)
 - `tools/clm_agent_cli` — CLI tool (clm-agent-cli)
-- `synthetic_data_loader` — CUAD dataset downloader (sythetic-data-loader)
+- `synthetic_data_loader` — CUAD dataset downloader (synthetic-data-loader)
 
 **Root workspace file**: `pyproject.toml` — contains member list and shared dev dependencies.
 
@@ -73,7 +73,7 @@ clm-platform-testing (platform_testing)
 ├── PyYAML>=6
 └── python-dotenv>=1.0
 
-sythetic-data-loader (synthetic_data_loader)
+synthetic-data-loader (synthetic_data_loader)
 ├── extraction-agent
 └── kagglehub
 
@@ -174,7 +174,7 @@ The setup script currently installs these **outside** of Python's dependency sys
 | `python` | 3.12+ | Runtime | All packages |
 | `git` | 2.20+ | Version control | Dev workflows |
 | `openssl` | 3.x | TLS libraries | hypercorn, FastAPI |
-| `sqlite3` | 3.35+ | Database | clm-web, sythetic-data-loader |
+| `sqlite3` | 3.35+ | Database | clm-web, synthetic-data-loader |
 | `uv` | 0.5+ | Python package manager | Setup/CI |
 | `mkcert` | 1.4+ | Local CA + cert generation | HTTPS setup |
 | `bun` | 1.0+ | Frontend package manager | web/frontend, web/admin |

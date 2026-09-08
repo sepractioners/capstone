@@ -90,7 +90,7 @@ members = [
     "platform_testing",         # clm-platform-testing
     "tools/contract_calc",      # contract-calc
     "tools/clm_agent_cli",      # clm-agent-cli
-    "synthetic_data_loader",     # sythetic-data-loader
+    "synthetic_data_loader",     # synthetic-data-loader
 ]
 
 [dependency-groups]
