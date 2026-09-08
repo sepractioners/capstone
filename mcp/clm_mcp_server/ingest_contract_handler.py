@@ -330,8 +330,9 @@ def _terms_command(
     source document stated no renewal / termination / deadline facts."""
     kd = candidate.key_dates
     key_dates = None
-    if kd.renewal_deadline or kd.termination_notice_deadline:
+    if kd.expiration_date or kd.renewal_deadline or kd.termination_notice_deadline:
         key_dates = KeyDates(
+            expiration_date=kd.expiration_date,
             renewal_deadline=kd.renewal_deadline,
             termination_notice_deadline=kd.termination_notice_deadline,
         )
