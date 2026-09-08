@@ -1,9 +1,42 @@
 #!/bin/bash
 set -euo pipefail
 
+# ============================================================================
 # Capstone Project Setup Script for Linux and Git Bash
-# Works on: Ubuntu/Debian, WSL, and Git Bash on Windows
-# Usage: bash scripts/setup-linux.sh [--no-ollama] [--no-sample-data]
+# ============================================================================
+#
+# WHAT THIS SCRIPT DOES:
+#   Prepares the complete Capstone development environment by:
+#   1. Verifying Python 3.11+ and installing uv (fast package manager)
+#   2. Creating Python virtual environment and syncing dependencies
+#   3. Installing mkcert and generating HTTPS certificates for local development
+#   4. Initializing SQLite database with schema
+#   5. Creating .env configuration file with default LLM settings
+#   6. Setting up Ollama (local LLM) with required models
+#   7. Downloading sample contracts from CUAD dataset
+#   8. Building RAG knowledge index for extraction agent
+#   9. Installing Node.js dependencies for frontend and admin console (bun/npm)
+#
+# WORKS ON:
+#   - Ubuntu/Debian Linux
+#   - WSL (Windows Subsystem for Linux)
+#   - Git Bash on Windows
+#
+# PREREQUISITES:
+#   - Python 3.11 or higher
+#   - Git (for cloning)
+#   - Internet connection (to download dependencies and sample data)
+#
+# WHAT IT CREATES:
+#   - .venv/              Python virtual environment
+#   - .certs/             HTTPS certificates for local development
+#   - .env                Configuration file with LLM and database settings
+#   - capstone.db         SQLite database
+#   - synthetic_data_loader/rag_knowledge.sqlite3  RAG vector index
+#   - web/*/node_modules  Node.js dependencies
+#
+# NEXT STEP AFTER SETUP:
+#   Run: bash scripts/run-all.sh
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -27,6 +60,21 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --no-ollama) SETUP_OLLAMA=false; shift ;;
     --no-sample-data) SETUP_SAMPLE_DATA=false; shift ;;
+    -h|--help) sed -n '4,48p' "$0"; cat << 'EOF'
+
+OPTIONS:
+  --no-ollama        Skip Ollama installation check (use if you have cloud LLM)
+  --no-sample-data   Skip downloading sample contracts
+  -h, --help         Show this help message
+
+EXAMPLES:
+  bash scripts/setup-linux.sh
+  bash scripts/setup-linux.sh --no-ollama
+  bash scripts/setup-linux.sh --no-ollama --no-sample-data
+
+For more details, see: https://github.com/anthropics/capstone
+EOF
+exit 0 ;;
     *) log_error "Unknown option: $1"; exit 1 ;;
   esac
 done
@@ -273,23 +321,26 @@ fi
 
 deactivate
 
-# === 13. Install frontend dependencies ===
-if command -v bun &> /dev/null; then
-  log_step "Installing frontend dependencies with bun..."
-  cd "$ROOT/web/frontend"
-  bun install
-  cd "$ROOT"
-  log_ok "Frontend dependencies installed"
-elif command -v npm &> /dev/null; then
-  log_step "Installing frontend dependencies with npm..."
-  cd "$ROOT/web/frontend"
-  npm install
-  cd "$ROOT"
-  log_ok "Frontend dependencies installed"
-else
-  log_warn "Neither bun nor npm found - frontend setup skipped"
-  log_warn "Install with: npm install -g bun or npm"
-fi
+# === 13. Install frontend and admin console dependencies ===
+for dir in "$ROOT/web/frontend" "$ROOT/web/admin"; do
+  if command -v bun &> /dev/null; then
+    log_step "Installing dependencies in ${dir#"$ROOT"/} with bun..."
+    cd "$dir"
+    bun install
+    cd "$ROOT"
+    log_ok "Dependencies installed in ${dir#"$ROOT"/}"
+  elif command -v npm &> /dev/null; then
+    log_step "Installing dependencies in ${dir#"$ROOT"/} with npm..."
+    cd "$dir"
+    npm install
+    cd "$ROOT"
+    log_ok "Dependencies installed in ${dir#"$ROOT"/}"
+  else
+    log_warn "Neither bun nor npm found - dependencies setup skipped"
+    log_warn "Install with: npm install -g bun or npm"
+    break
+  fi
+done
 
 # === Summary ===
 echo ""

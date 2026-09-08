@@ -2,7 +2,35 @@
 <#
 .SYNOPSIS
     Capstone Project Setup Script for Windows
-    Installs all dependencies, configures the environment, and prepares sample data
+
+.DESCRIPTION
+    Prepares the complete Capstone development environment by:
+    1. Verifying Python 3.11+ and installing uv (fast package manager)
+    2. Creating Python virtual environment and syncing dependencies
+    3. Installing mkcert and generating HTTPS certificates for local development
+    4. Initializing SQLite database with schema
+    5. Creating .env configuration file with default LLM settings
+    6. Setting up Ollama (local LLM) with required models
+    7. Downloading sample contracts from CUAD dataset
+    8. Building RAG knowledge index for extraction agent
+    9. Installing Node.js dependencies for frontend and admin console (bun/npm)
+
+    CREATES:
+    - .venv/              Python virtual environment
+    - .certs/             HTTPS certificates for local development
+    - .env                Configuration file with LLM and database settings
+    - capstone.db         SQLite database
+    - synthetic_data_loader/rag_knowledge.sqlite3  RAG vector index
+    - web/*/node_modules  Node.js dependencies
+
+.PARAMETER NoOllama
+    Skip Ollama installation check (use if you have cloud LLM like OpenRouter)
+
+.PARAMETER NoSampleData
+    Skip downloading sample contracts from CUAD dataset
+
+.PARAMETER NoFrontend
+    Skip frontend dependency installation
 
 .EXAMPLE
     .\scripts\setup-windows.ps1
@@ -13,11 +41,18 @@
     Skip Ollama setup (for cloud LLM providers)
 
 .EXAMPLE
-    .\scripts\setup-windows.ps1 -NoSampleData
-    Skip sample contract download
+    .\scripts\setup-windows.ps1 -NoOllama -NoSampleData
+    Minimal setup: only dependencies, no LLM or sample data
 
 .NOTES
-    Requires: PowerShell 5.1+, Administrator access (for some package managers)
+    Requires: PowerShell 5.1+, Administrator access (for package managers)
+
+    PREREQUISITES:
+    - Python 3.11 or higher
+    - Internet connection (to download dependencies and sample data)
+
+    NEXT STEP AFTER SETUP:
+    Run: .\scripts\run-all.ps1
 #>
 
 [CmdletBinding()]
@@ -251,25 +286,27 @@ if (-not (Test-Path $RagDbFile)) {
     Write-Ok "RAG index already exists"
 }
 
-# === 12. Install frontend dependencies (optional) ===
-if (-not $NoFrontend) {
+# === 12. Install frontend and admin console dependencies ===
+foreach ($dir in @("web\frontend", "web\admin")) {
+    $dirPath = Join-Path $Root $dir
     if (Test-Command bun) {
-        Write-Step "Installing frontend dependencies with bun..."
-        cd (Join-Path $Root "web" "frontend")
+        Write-Step "Installing dependencies in $dir with bun..."
+        cd $dirPath
         bun install
         cd $Root
-        Write-Ok "Frontend dependencies installed"
+        Write-Ok "Dependencies installed in $dir"
     } else {
         Write-Warn "bun not found - using npm instead"
         if (Test-Command npm) {
-            Write-Step "Installing frontend dependencies with npm..."
-            cd (Join-Path $Root "web" "frontend")
+            Write-Step "Installing dependencies in $dir with npm..."
+            cd $dirPath
             npm install
             cd $Root
-            Write-Ok "Frontend dependencies installed"
+            Write-Ok "Dependencies installed in $dir"
         } else {
-            Write-Warn "Neither bun nor npm found - frontend setup skipped"
+            Write-Warn "Neither bun nor npm found - dependencies setup skipped"
             Write-Warn "Install with: npm install -g bun"
+            break
         }
     }
 }

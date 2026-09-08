@@ -1,24 +1,98 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Start every local app in the Capstone workspace: the FastAPI/Hypercorn
-    backend and the Bun/Vite frontend. Each runs in its own window.
+    Capstone Project - Start All Services (Windows)
+
+.DESCRIPTION
+    Starts the complete Capstone application stack on Windows:
+    1. Verifies all required tools (uv, bun, Python, Node)
+    2. Checks LLM provider configuration (Ollama or OpenRouter)
+    3. Syncs Python and Node dependencies (unless -NoSync)
+    4. Starts FastAPI backend (HTTPS on port 8443)
+    5. Starts Vite frontend - Contract Portal (HTTPS on port 5173)
+    6. Starts Vite frontend - Agent Console (HTTPS on port 5174)
+    7. Optionally creates admin account on first run
+
+    PREFLIGHT CHECKS:
+    - Verifies uv, bun, Python, mkcert are installed
+    - Checks HTTPS certificates exist (.certs/)
+    - Checks LLM_PROVIDER setting in .env
+    - Verifies Ollama is running (if using local LLM)
+    - Verifies OpenRouter API key (if using cloud LLM)
+
+    SERVICES STARTED:
+    - Backend API:         https://localhost:8443  (FastAPI + Hypercorn)
+    - Contract Portal:     https://localhost:5173  (Vite + React)
+    - Agent Console:       https://localhost:5174  (Vite + React, admin only)
+
+    OUTPUT:
+    - Logs written to .run/*.log
+    - Service status in .run/services.json
+    - Stop with: .\scripts\run-all.ps1 -Stop
+
+.PARAMETER NoSync
+    Skip uv sync and bun install (assumes dependencies are already installed).
+
+.PARAMETER Bootstrap
+    Create the local admin account via /auth/bootstrap on first run.
+    Credentials: Email: admin@capstone.local, Password: CapstoneAdmin!2026
+
+.PARAMETER Stop
+    Stop all services from a previous run and exit (all other parameters ignored).
+
+.PARAMETER NoApi
+    Skip starting the backend API service.
+
+.PARAMETER NoFrontend
+    Skip starting the frontend (contract portal) service.
+
+.PARAMETER NoConsole
+    Skip starting the admin console service.
+
+.PARAMETER BindHost
+    Bind to this host instead of localhost (default: localhost).
+
+.PARAMETER ApiPort, FrontendPort, ConsolePort
+    Port numbers for each service (defaults: 8443, 5173, 5174).
+
+.PARAMETER OrgName
+    Organization name for bootstrap (default: Capstone).
+
+.PARAMETER AdminEmail, AdminPassword, AdminName
+    Admin account credentials for bootstrap (only used with -Bootstrap).
 
 .EXAMPLE
-    .\scripts\run-all.ps1 -Sync -Bootstrap
-    Sync the uv workspace + bun deps, create the local admin account, then start.
+    .\scripts\run-all.ps1
+    Sync dependencies and start all services.
+
+.EXAMPLE
+    .\scripts\run-all.ps1 -Bootstrap
+    Sync dependencies, create admin account, then start (use on first run).
+
+.EXAMPLE
+    .\scripts\run-all.ps1 -NoSync
+    Start without syncing dependencies (assumes they are already installed).
+
+.EXAMPLE
+    .\scripts\run-all.ps1 -NoFrontend
+    Start API and Console, skip Contract Portal.
 
 .EXAMPLE
     .\scripts\run-all.ps1 -Stop
-    Stop the apps started by a previous run.
+    Stop all services from a previous run.
 
 .NOTES
-    MCP servers are not started here - the agents spawn them as stdio
-    subprocesses on demand. Local LLM features additionally need Ollama running.
+    LLM CONFIGURATION (from .env):
+    - LLM_PROVIDER=ollama (default): requires Ollama running on http://127.0.0.1:11434
+    - LLM_PROVIDER=openrouter: requires OPENROUTER_API_KEY in .env
+    Script will STOP if LLM is not properly configured or not running.
+
+    MCP SERVERS:
+    Spawned by agents as needed (not started by this script).
 #>
 [CmdletBinding()]
 param(
-    [switch]$Sync,          # uv sync --all-packages + bun install first
+    [switch]$NoSync,        # skip uv sync --all-packages + bun install
     [switch]$Bootstrap,     # create the local admin account via /auth/bootstrap
     [switch]$Stop,          # stop apps from a previous run and exit
     [switch]$NoApi,         # skip the backend
@@ -151,9 +225,48 @@ if (-not $NoFrontend) {
     Write-Ok "bun: $bun"
 }
 
+# --- LLM provider check -------------------------------------------------------
+
+$envFile = Join-Path $Root ".env"
+$llmProvider = "ollama"
+if (Test-Path $envFile) {
+    $envContent = Get-Content $envFile -Raw
+    if ($envContent -match '^\s*LLM_PROVIDER\s*=\s*(\S+)') {
+        $llmProvider = $matches[1].Trim()
+    }
+}
+
+if ($llmProvider -eq "ollama") {
+    Write-Step "Checking Ollama service (LLM_PROVIDER=ollama)..."
+    try {
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:11434/api/tags" -ErrorAction Stop -TimeoutSec 2
+        Write-Ok "Ollama is running"
+    } catch {
+        Write-Host "Ollama is not running on http://127.0.0.1:11434" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Options:"
+        Write-Host "  1. Start Ollama: ollama serve"
+        Write-Host "  2. Switch to OpenRouter API: edit .env and set LLM_PROVIDER=openrouter"
+        Write-Host ""
+        exit 1
+    }
+} elseif ($llmProvider -eq "openrouter") {
+    Write-Step "Checking OpenRouter configuration..."
+    if (Test-Path $envFile) {
+        $envContent = Get-Content $envFile -Raw
+        if ($envContent -match '^\s*OPENROUTER_API_KEY\s*=\s*(\S+)') {
+            Write-Ok "OpenRouter API key configured"
+        } else {
+            throw "OpenRouter API key not found in .env"
+        }
+    } else {
+        throw "OpenRouter API key not configured in .env"
+    }
+}
+
 # --- optional sync -----------------------------------------------------------
 
-if ($Sync) {
+if (-not $NoSync) {
     Write-Step "uv sync --all-packages"
     & $uv.Exe @($uv.Pre) sync --all-packages
     if ($LASTEXITCODE -ne 0) { throw "uv sync failed." }

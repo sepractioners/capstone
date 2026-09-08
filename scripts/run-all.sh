@@ -1,15 +1,66 @@
 #!/usr/bin/env bash
-# Start every local app in the Capstone workspace: the FastAPI/Hypercorn backend,
-# the Bun/Vite contract portal, and the agent observability console.
+# ============================================================================
+# Capstone Project - Start All Services
+# ============================================================================
 #
-#   ./scripts/run-all.sh --sync --bootstrap   sync deps, create the admin account, start
-#   ./scripts/run-all.sh --stop               stop apps from a previous run
+# WHAT THIS SCRIPT DOES:
+#   Starts the complete Capstone application stack:
+#   1. Verifies all required tools (uv, bun, Python, Node)
+#   2. Checks LLM provider configuration (Ollama or OpenRouter)
+#   3. Syncs Python and Node dependencies (unless --no-sync)
+#   4. Starts FastAPI backend (HTTPS on port 8443)
+#   5. Starts Vite frontend - Contract Portal (HTTPS on port 5173)
+#   6. Starts Vite frontend - Agent Console (HTTPS on port 5174)
+#   7. Optionally creates admin account on first run
 #
-# MCP servers are not started here - the agents spawn them as stdio subprocesses
-# on demand. Local LLM features additionally need Ollama running.
+# PREFLIGHT CHECKS:
+#   - Verifies uv, bun, Python, mkcert are installed
+#   - Checks HTTPS certificates exist (.certs/)
+#   - Checks LLM_PROVIDER setting in .env
+#   - Verifies Ollama is running (if using local LLM)
+#   - Verifies OpenRouter API key (if using cloud LLM)
+#
+# SERVICES STARTED:
+#   - Backend API:         https://localhost:8443  (FastAPI + Hypercorn)
+#   - Contract Portal:     https://localhost:5173  (Vite + React)
+#   - Agent Console:       https://localhost:5174  (Vite + React, admin only)
+#
+# OUTPUT:
+#   - Logs written to .run/*.log
+#   - Service status in .run/services.tsv
+#   - Stop with: ./scripts/run-all.sh --stop
+#
+# USAGE:
+#   ./scripts/run-all.sh                      sync deps and start all services
+#   ./scripts/run-all.sh --bootstrap          create admin account on first run
+#   ./scripts/run-all.sh --no-sync            start without syncing dependencies
+#   ./scripts/run-all.sh --stop               stop all running services
+#
+# OPTIONS:
+#   --no-sync                 skip uv sync and bun install (assumes deps installed)
+#   --bootstrap               create local admin account (email: admin@capstone.local)
+#   --stop                    stop services from a previous run
+#   --no-api, --no-frontend, --no-console    skip starting specific services
+#   --host HOST               bind to HOST instead of localhost
+#   --api-port PORT           API port (default: 8443)
+#   --frontend-port PORT      frontend port (default: 5173)
+#   --console-port PORT       console port (default: 5174)
+#
+# LLM CONFIGURATION (from .env):
+#   Reads LLM_PROVIDER setting and validates configuration:
+#   - ollama:     requires Ollama running on http://127.0.0.1:11434
+#   - openrouter: requires OPENROUTER_API_KEY in .env
+#   Script will STOP if LLM is not properly configured or not running.
+#
+# CREDENTIALS (on first run with --bootstrap):
+#   - Email:    admin@capstone.local
+#   - Password: CapstoneAdmin!2026
+#
+# MCP SERVERS:
+#   Spawned by agents as needed (not started by this script)
 set -euo pipefail
 
-SYNC=0; BOOTSTRAP=0; STOP=0
+SYNC=1; BOOTSTRAP=0; STOP=0
 NO_API=0; NO_FRONTEND=0; NO_CONSOLE=0
 BIND_HOST="localhost"
 API_PORT=8443; FRONTEND_PORT=5173; CONSOLE_PORT=5174
@@ -20,7 +71,7 @@ ADMIN_NAME="Capstone Admin"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --sync) SYNC=1 ;;
+        --no-sync) SYNC=0 ;;
         --bootstrap) BOOTSTRAP=1 ;;
         --stop) STOP=1 ;;
         --no-api) NO_API=1 ;;
@@ -33,7 +84,7 @@ while [[ $# -gt 0 ]]; do
         --admin-email) ADMIN_EMAIL="$2"; shift ;;
         --admin-password) ADMIN_PASSWORD="$2"; shift ;;
         --org-name) ORG_NAME="$2"; shift ;;
-        -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,56p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -123,6 +174,37 @@ fi
 if (( ! NO_FRONTEND )) || (( ! NO_CONSOLE )); then
     command -v bun >/dev/null 2>&1 || { echo "bun not found. Install it: https://bun.sh" >&2; exit 1; }
     ok "bun: $(command -v bun)"
+fi
+
+# === Check LLM Provider Configuration ===
+ENV_FILE="$ROOT/.env"
+LLM_PROVIDER="ollama"
+if [[ -f "$ENV_FILE" ]]; then
+    LLM_PROVIDER=$(grep -E '^LLM_PROVIDER=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 | tr -d ' ')
+    [[ -z "$LLM_PROVIDER" ]] && LLM_PROVIDER="ollama"
+fi
+
+if [[ "$LLM_PROVIDER" == "ollama" ]]; then
+    step "Checking Ollama service (LLM_PROVIDER=ollama)..."
+    if ! curl -s http://127.0.0.1:11434/api/tags &>/dev/null; then
+        log_error "Ollama is not running on http://127.0.0.1:11434"
+        echo ""
+        echo "Options:"
+        echo "  1. Start Ollama: ollama serve"
+        echo "  2. Switch to OpenRouter API: edit .env and set LLM_PROVIDER=openrouter"
+        echo ""
+        exit 1
+    fi
+    ok "Ollama is running"
+elif [[ "$LLM_PROVIDER" == "openrouter" ]]; then
+    step "Checking OpenRouter configuration..."
+    OPENROUTER_KEY=$(grep -E '^OPENROUTER_API_KEY=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 | tr -d ' ')
+    if [[ -z "$OPENROUTER_KEY" ]]; then
+        log_error "OpenRouter API key not found in .env"
+        echo "Set OPENROUTER_API_KEY in .env file" >&2
+        exit 1
+    fi
+    ok "OpenRouter API key configured"
 fi
 
 if (( SYNC )); then
