@@ -35,11 +35,13 @@ python seed_database.py          # Download CUAD contracts + build RAG index
 ### 3. Start the Platform
 ```bash
 # macOS/Linux
-bash scripts/run-mac.sh
+bash scripts/run-all.sh
 
 # Windows
 .\scripts\run-all.ps1
 ```
+
+Stop everything with `--stop` (`-Stop` on Windows). Service logs are written to `.run/`.
 
 Access:
 - **Portal**: https://localhost:5173 (contract reader + agent workspace)
@@ -211,10 +213,11 @@ Run the agent orchestrator CLI (handles login):
 
 ```bash
 # Ask analytical questions
-./scripts/agent.ps1 ask "Which contracts expire this quarter?"
+./scripts/agent.sh ask "Which contracts expire this quarter?"      # macOS/Linux
+.\scripts\agent.ps1 ask "Which contracts expire this quarter?"     # Windows
 
 # Extract and analyze a contract
-./scripts/agent.ps1 task "extract and compare to vendor agreements" --file ./vendor.pdf
+./scripts/agent.sh task "extract and compare to vendor agreements" --file ./vendor.pdf
 ```
 
 For more details, see [web/README.md](web/README.md) and [Agent CLI documentation](tools/clm_agent_cli/README.md).
