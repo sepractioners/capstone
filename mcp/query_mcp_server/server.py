@@ -18,7 +18,32 @@ from .payload import ContractQueryRequest
 DEFAULT_DATABASE_PATH = os.environ.get("CLM_DATABASE_PATH", "clm.sqlite3")
 app = MCPServer(
     name="clm-query-mcp-server",
-    instructions="Read-only CLM analysis boundary. Analyze only authorized organization contract evidence.",
+    instructions="""Read-only CLM analysis boundary. Query and analyze contracts for organization.
+
+TOOL ROUTING GUIDE:
+1. analyze_contracts: Answer a question grounded in contract evidence (reasoning)
+   - User: "Do we have non-compete clauses?"
+   - Use this for questions requiring synthesis across multiple clauses
+
+2. find_contracts: List all contracts matching criteria (deterministic filtering)
+   - User: "Which vendor contracts expire in 90 days?"
+   - Use this for discovery, not reasoning
+
+3. search_clauses: Find specific clauses by keyword (internal + direct search)
+   - Used by agents to retrieve evidence during reasoning
+   - Also available for direct "Show me all liability caps" queries
+
+4. count_contracts: Count contracts matching filters (fast aggregation)
+   - User: "How many active NDAs do we have?"
+   - Returns count only, not contract details
+
+KEY HEURISTICS:
+- Portfolio queries (contract_id=None): "Do we have X?" "List all Y contracts"
+- Specific queries (contract_id=<uuid>): "In this contract, what is X?"
+- Escalate to "Not covered" if evidence <50% relevant
+- Separate facts (stated) from implications (inferred)
+- When ambiguous, show all interpretations with confidence scores
+""",
 )
 _dependencies: Dependencies | None = None
 
@@ -32,7 +57,33 @@ def get_dependencies() -> Dependencies:
 
 @app.tool()
 async def analyze_contracts(request: ContractQueryRequest) -> dict:
-    """Answer a question over one or all contracts owned by the trusted organization context."""
+    """Answer a question over contracts owned by an organization, grounded in contract evidence.
+
+    ROUTING HEURISTICS:
+    - contract_id=None: portfolio query ("Do we have non-competes?" "Which contracts expire soon?")
+    - contract_id=<uuid>: specific contract ("What are renewal terms?" "Is there an SLA?")
+    - history=list: multi-turn conversation ("Tell me more" → use history from prior turns)
+    - history=empty/None: one-off question
+
+    PROMPT EXAMPLES → PARAMETERS:
+    1. "Do any contracts require liability insurance?"
+       → analyze_contracts(question="...", contract_id=None)
+    2. "In this contract, what is the renewal date?"
+       → analyze_contracts(question="...", contract_id=<uuid>)
+    3. "Who are the other parties?" (follow-up to prior answer)
+       → analyze_contracts(question="...", history=[prior turns])
+
+    ESCALATION HEURISTICS:
+    - If retrieved evidence <50% relevant: return "Not covered in contracts"
+    - If multiple contradictory clauses found: return all with confidence scores
+    - If question requires inference: flag "Not stated; inferred from..."
+
+    SCOPE BOUNDARIES:
+    - IN: Terms, obligations, dates, conditions explicitly stated in contract
+    - OUT: Industry practices, regulatory requirements, "should be there"
+
+    RETURNS: {question, answer, sources[], grounded, debug_trace}
+    """
     contracts = contracts_for_organization(
         get_dependencies(), DEFAULT_DATABASE_PATH, request.organization_id, request.contract_id
     )
@@ -87,11 +138,27 @@ def find_contracts(
     min_value: float | None = None,
     max_value: float | None = None,
 ) -> dict:
-    """Every tenant-owned contract whose clause / obligation / term text contains
-    all the content words in ``query`` (e.g. "liability insurance", "non-compete").
+    """Search for contracts by text and filters. Complete enumeration (ALL matching contracts).
 
-    Complete enumeration, not a ranked sample - use this for "which contracts
-    require X" / "do any contracts have X". Deterministic, no LLM.
+    WHEN TO USE THIS vs. analyze_contracts:
+    - find_contracts: "List all contracts with non-compete clauses" (deterministic filter)
+    - analyze_contracts: "Are there non-compete clauses?" (reasoning + evidence)
+
+    PROMPT EXAMPLES → PARAMETERS:
+    1. "Show contracts expiring in next 90 days"
+       → find_contracts(query="expiring", expiring_within_days=90)
+    2. "Which vendor contracts are active?"
+       → find_contracts(query="", lifecycle_status="active", contract_type="vendor")
+    3. "Find all deals with Acme Corp worth >$1M"
+       → find_contracts(query="Acme Corp", min_value=1000000)
+
+    KEY HEURISTIC: query parameter is full-text (ALL words must match).
+    - "liability insurance" → matches only if both words present
+    - "insurance" → matches "liability insurance", "cyber insurance", etc.
+    - Empty query + filters → filters alone (e.g., expiring_within_days=90)
+
+    RETURNS: {query, filters, total_matches, contracts: [{id, type, parties, value, ...}]}
+    Note: No ranking or sorting - for deterministic discovery only.
     """
     contracts = contracts_for_organization(get_dependencies(), DEFAULT_DATABASE_PATH, organization_id)
     where = _where(lifecycle_status, contract_type, party, effective_year, expiring_within_days, min_value, max_value)
@@ -100,10 +167,26 @@ def find_contracts(
 
 @app.tool()
 def search_clauses(organization_id: str, query: str, limit: int = 8) -> list[dict]:
-    """Return the evidence records best matching a query, without calling an LLM.
+    """Search for specific clauses/obligations by keyword (no LLM, fast deterministic ranking).
 
-    Tenant-scoped: only organization-owned contracts are searched. Used by the
-    query agent's reasoning loop and available to other read-only callers.
+    WHEN TO USE:
+    - Internal step in query agent's reasoning (retrieves evidence before answering)
+    - Direct search for specific clause text: "Find all liability caps"
+    - Building fact-checking evidence: "What exactly does the contract say about..."
+
+    PROMPT EXAMPLES:
+    1. "Show me renewal clauses"
+       → search_clauses(query="renewal", limit=10)
+    2. "Find termination notice requirements"
+       → search_clauses(query="termination notice", limit=5)
+
+    RETURNS: [{contract_id, clause_text, page, type, score}, ...]
+    - Ranked by relevance (highest score first)
+    - Limit capped at 25 max (prevent token overflow)
+    - Default limit=8 sufficient for most queries
+
+    NOTE: This is deterministic keyword ranking, not semantic search.
+    For semantic search (similar concepts), use analyze_contracts instead.
     """
     contracts = contracts_for_organization(get_dependencies(), DEFAULT_DATABASE_PATH, organization_id)
     records = [record for contract in contracts for record in flatten_contract_evidence(contract)]
