@@ -101,12 +101,14 @@ async def acall(
     """
     s = settings_for(role)
     result: Any = None
+    raw_text = ""
     note = ""
     started = recorder.start() if recorder is not None else None
     try:
         response = await raw_completion(role, system, user, schema=schema, temperature=temperature, timeout=timeout)
         message = response.choices[0].message
-        result = message.parsed if schema is not None else (message.content or "")
+        raw_text = getattr(message, "content", None) or ""
+        result = message.parsed if schema is not None else raw_text
         if schema is not None and result is None:
             note = "no structured output"
     except Exception as exc:  # noqa: BLE001 - callers decide what a failure means
@@ -120,6 +122,7 @@ async def acall(
             system_prompt=system,
             context={"user": user, **(context_extra or {})},
             output=result.model_dump(mode="json") if isinstance(result, BaseModel) else result,
+            output_raw=raw_text,
             reasoning=str(getattr(result, "reasoning", "") or ""),
             started=started,
             note=note,
@@ -151,6 +154,7 @@ async def acall_retrying(
     reflecting the final attempt; ``record_extra`` keys override the computed ones.
     """
     parsed: BaseModel | None = None
+    raw_text = ""
     last_error: Exception | None = None
     attempts = 0
     started = recorder.start() if recorder is not None else None
@@ -160,7 +164,9 @@ async def acall_retrying(
         prompt = user + (retry_hint if attempt else "")
         try:
             response = await raw_completion(role, system, prompt, schema=schema)
-            parsed = response.choices[0].message.parsed
+            message = response.choices[0].message
+            raw_text = getattr(message, "content", None) or ""
+            parsed = message.parsed
             last_error = None
         except Exception as exc:  # noqa: BLE001 - retryable
             last_error = exc
@@ -181,6 +187,7 @@ async def acall_retrying(
             system_prompt=system,
             context={"user": user, **(context_extra or {})},
             output=parsed.model_dump(mode="json") if isinstance(parsed, BaseModel) else None,
+            output_raw=raw_text,
             reasoning=str(getattr(parsed, "reasoning", "") or ""),
             started=started,
             note=note,
