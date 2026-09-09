@@ -43,6 +43,8 @@ Track hypotheses about agent architecture, prompts, and MCP usage. Proven hypoth
 - Query MCP already accepts `history: list[ConversationTurn]`
 - Portal already sends history to query agent
 - Need benchmark: evaluate 30 conversation chains with/without history
+- Routing home: the *multi-turn follow-up* handling in the prompt-template
+  catalogue (`agents/query_agent/README.md` → Original hypothesis → template mapping)
 
 **Heuristic Candidate** (if validated): "Always pass history for conversational queries; omit only for one-shot questions"
 
@@ -62,8 +64,13 @@ Track hypotheses about agent architecture, prompts, and MCP usage. Proven hypoth
 
 **Current Status**: **DEPLOYED (Post-Enhancement)**
 - Tool descriptions now include routing examples, prompt patterns, anti-patterns
-- Need retrospective evaluation: sample queries from 2 weeks pre/post enhancement
-- Next step: Design evaluation suite (50 queries, categorized by tool/parameter complexity)
+- Query agent: superseded by the prompt-template catalogue - the planner names a
+  template (an embedded description = tool allowlist + cues + scaffold) rather
+  than picking raw tools. See `agents/query_agent/prompts/templates.yaml` and the
+  hypothesis → template mapping in `agents/query_agent/README.md`. ADR-0004.
+- Next step: `platform_testing/probe/query_agent_probe.py` scores the resolved
+  plan against `expect_plan` per question - that is the H3 eval suite for the
+  query agent.
 
 **Heuristic Candidate** (if validated): "Always embed routing examples and anti-patterns in tool descriptions; update when adding new capabilities"
 
@@ -102,10 +109,14 @@ Track hypotheses about agent architecture, prompts, and MCP usage. Proven hypoth
 - Treatment: Structured system prompt (explicit Goal/Constraints/Escalate)
 - Metric: Hallucination rate (incorrect claims not in contract), escalation rate (correct "not covered"), false positives
 
-**Current Status**: **HYPOTHESIS ONLY**
-- Query agent system prompt (agents/query_agent/prompts.py) needs audit
-- Extraction agent system prompt needs similar audit
-- Need to implement structured prompts if not present
+**Current Status**: **PARTIALLY IMPLEMENTED (query agent)**
+- Each prompt template (`agents/query_agent/prompts/templates.yaml`) carries a
+  goal + constraints scaffold; the `coverage` rule is the "don't overclaim"
+  constraint; `T12_out_of_scope` is the explicit escalate path. Mapped in
+  `agents/query_agent/README.md` → Original hypothesis → template mapping.
+- Extraction agent system prompt needs similar audit.
+- Eval: run `platform_testing/probe/query_agent_probe.py` on answerable +
+  unanswerable questions; score hallucination / escalation rate.
 
 **Heuristic Candidate** (if validated): "Always structure system prompts: Goal → Sub-goals → Constraints → Trade-offs → Escalate conditions"
 

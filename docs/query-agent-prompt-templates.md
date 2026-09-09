@@ -10,6 +10,7 @@ call outside the named template's tools. **No tool selection lives in code.**
 - Machine copy the planner loads: [`agents/query_agent/prompts/templates.yaml`](../agents/query_agent/prompts/templates.yaml)
 - Decision record: [ADR-0004](adr/0004-query-agent-routing-and-retrieval.md)
 - Benchmark questions: [`docs/query-agent-benchmark-questions.md`](query-agent-benchmark-questions.md)
+- **Which standing hypothesis each template enforces:** [`agents/query_agent/README.md`](../agents/query_agent/README.md#original-hypothesis--template-mapping)
 
 **Invariant — tenant scope:** every tool call is scoped to the caller's
 `organization_id`. There is no unscoped read of contract data on any path.

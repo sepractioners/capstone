@@ -58,6 +58,51 @@ Query MCP supplies. The scratchpad (tool calls, evidence labels, `what_matters`)
 is working memory, discarded after the response. Every step falls back
 gracefully; only the final draft step can fail the request.
 
+## Prompt templates
+
+The planner names one **prompt template** per question; that fixes its tool
+allowlist. Full catalogue - each template's cues, scaffold, answer contract and
+coverage rule: **[`docs/query-agent-prompt-templates.md`](../../docs/query-agent-prompt-templates.md)**.
+Machine source the planner loads: [`prompts/templates.yaml`](prompts/templates.yaml).
+
+Tools: 🔢 `count_contracts` · 📇 `list_contracts` · 🔎 `find_contracts` ·
+∑ `aggregate_contracts` · 📄 `search_clauses`. **D** = deterministic (no LLM
+draft; the templates degraded mode routes to) · **S** = LLM synthesis · **cov**
+= must convey coverage when the matched set exceeds what the model read.
+
+| id | template | mode | tools |
+|---|---|---|---|
+| T1 | `portfolio_census` | D | 🔢 ∑ |
+| T2 | `filtered_roster` | D cov | 📇 🔢 |
+| T3 | `clause_presence` | D cov | 🔎 🔢 |
+| T4 | `financial_rollup` | D | ∑ 📇 |
+| T5 | `expiring_and_renewals` | D→S | 📇 🔎 📄 |
+| T6 | `clause_detail` | S | 📇 📄 |
+| T7 | `cross_contract_synthesis` | S cov | 🔎 📄 |
+| T8 | `comparative_review` | S cov | 📇 📄 |
+| T9 | `risk_exposure_review` | S cov | 🔎 📇 📄 — **fallback** for any unrouted question |
+| T10 | `obligation_tracker` | D | 📇 🔎 |
+| T11 | `counterparty_profile` | D | 📇 🔢 ∑ |
+| T12 | `out_of_scope` | — | (none — escalate) |
+
+### Original hypothesis → template mapping
+
+The templates are how the standing hypotheses / heuristics are enforced in the
+routing layer. Sources: [`AGENT_HYPOTHESES.md`](../../AGENT_HYPOTHESES.md),
+[`MCP_HEURISTICS.md`](../../MCP_HEURISTICS.md) §2 (Query MCP Server).
+
+| Hypothesis / heuristic | Enforced by |
+|---|---|
+| **H3** — embedded tool descriptions improve parameter mapping | the template mechanism itself: the planner names a template (an embedded description = allowlist + cues + scaffold), never picks raw tools |
+| **H5 / VH2** — structured cognitive loops (Goal → Constraints → Escalate) prevent hallucination | every template `scaffold` states goal + constraints; the `coverage` rule is the "don't overclaim" constraint; T12 is the escalate path |
+| **VH1** — training-data quality > model size | the **D** templates (T1–T5, T10, T11) + `QUERY_DETERMINISTIC_COMPOSE`: a small model only routes, the tools compute — this is all `QUERY_PLAN_TOOLS=0` degraded mode serves |
+| **VH3** — grounding via plan → prep → pipeline | the `gather` step each template drives: deterministic portfolio tools + `search_clauses` retrieval within `QUERY_EVIDENCE_BUDGET` |
+| **H2** — conversation history improves multi-turn accuracy | the *multi-turn follow-up* handling — resolve the referent from `history`, then apply the template the follow-up implies (untested; this is where H2 is measured) |
+| **§2.1** — question scope (portfolio vs one contract) | T6 `clause_detail` resolves a named contract first; every other template is organization-scoped |
+| **§2.2** — escalate when evidence is weak | T12 `out_of_scope`; T6's "not stated in `<contract>`"; the **cov** rule on T2/T3/T7/T8/T9 (flag partial coverage, offer the count / a narrower filter) |
+| **§2.3** — `find_contracts` (exact enumeration) vs reasoning | the T3 (🔎, complete matched count) vs T6/T7 (📄, ranked sample) split *is* this heuristic |
+| **§2.4** — history for follow-ups | the *multi-turn follow-up* row above |
+
 ## Configuration
 
 Provider, model, temperature, timeout, `OLLAMA_HOST`, and embedding settings are
