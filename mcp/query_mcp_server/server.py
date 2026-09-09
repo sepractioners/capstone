@@ -18,32 +18,45 @@ from .payload import ContractQueryRequest
 DEFAULT_DATABASE_PATH = os.environ.get("CLM_DATABASE_PATH", "clm.sqlite3")
 app = MCPServer(
     name="clm-query-mcp-server",
-    instructions="""Read-only CLM analysis boundary. Query and analyze contracts for organization.
+    instructions="""Read-only CLM analysis boundary. Every call is scoped to the
+caller's organization - there is no unscoped read. Counts, sums and date
+arithmetic are computed by the tools, never by the model.
 
-TOOL ROUTING GUIDE:
-1. analyze_contracts: Answer a question grounded in contract evidence (reasoning +
-   synthesis across clauses). "Do we have non-compete clauses?"
-2. find_contracts: Complete enumeration of contracts matching a text phrase and/or
-   filters. "Which vendor contracts expire in 90 days?" Discovery, not reasoning.
-3. search_clauses: Ranked clause snippets by keyword. Evidence retrieval / "show me
-   all liability caps".
-4. count_contracts: Counts, optionally filtered. "How many active NDAs?"
-5. list_contracts / aggregate_contracts: filtered rows / count|sum|avg|min|max of value.
+TOOL ROUTING GUIDE (full taxonomy: docs/query-agent-prompt-templates.md):
+1. analyze_contracts: a question that needs reasoning / synthesis across clauses -
+   "what are our biggest risks", "how is liability limited across the portfolio",
+   "what does the Acme indemnity say". Runs the plan -> gather -> synthesise loop.
+2. count_contracts: exact counts / breakdowns - "how many active NDAs", "break
+   down by type". Deterministic.
+3. list_contracts: the contracts matching a status/type/party/date/value filter.
+   detail="full" only for a small filtered set.
+4. find_contracts: EVERY contract whose clause/obligation text contains a phrase -
+   "which contracts require liability insurance", "do any have a non-compete".
+   Complete enumeration. Use this, NOT search_clauses, for "which contracts...".
+5. search_clauses: ranked clause snippets for one-/few-contract DETAIL - "what
+   does clause X say". Evidence retrieval, not enumeration.
+6. aggregate_contracts: count|sum|avg|min|max of contract value, optionally
+   grouped. The tool does the arithmetic.
 
-FILTERS: lifecycle_status and contract_type must be one of the values that exist in
-this portfolio (call count_contracts with no filter to see by_lifecycle_status /
-by_contract_type keys). Pass the stored spelling ("vendor-agreement"), not the
-user's words ("vendor agreements").
+find_contracts vs search_clauses: "which contracts mention X" -> find_contracts
+(scans every contract, exact matched count). "what does X say" -> search_clauses
+(ranked detail, a sample).
+
+FILTERS: lifecycle_status and contract_type must be a value that exists in this
+organization's portfolio (call count_contracts with no filter to see the
+by_lifecycle_status / by_contract_type keys). Pass the stored spelling
+("vendor-agreement"), not the user's words ("vendor agreements").
 
 RESULT PRECEDENCE: count_contracts returns `matched` (respects the filter) plus
 `by_lifecycle_status` / `by_contract_type` (whole portfolio, ignore the filter).
 When a filter is set, `matched` is the answer - never a number from a by_* block.
 
-KEY HEURISTICS:
-- Portfolio queries (contract_id=None): "Do we have X?" "List all Y contracts"
-- Specific queries (contract_id=<uuid>): "In this contract, what is X?"
-- Escalate to "Not covered" if evidence <50% relevant
-- Separate facts (stated) from implications (inferred)
+COVERAGE: when an answer is synthesised from a sample of a larger matched set,
+say so and offer the exact count or a narrower filter - never imply it covered
+every contract.
+
+ESCALATE: legal advice, market comparison, or predictions are out of scope -
+report what the contracts state, not what the user should do.
 """,
 )
 _dependencies: Dependencies | None = None

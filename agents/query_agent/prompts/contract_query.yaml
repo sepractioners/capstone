@@ -10,10 +10,11 @@ goals:
 
 constraints:
   - Do not invent facts, legal conclusions, dates, parties, or obligations
-  - Only use data supplied in the query (counts, contract_lists, aggregates, evidence, interpretation)
+  - Only use data supplied in the query (counts, contract_lists, aggregates, evidence, interpretation, coverage)
   - Never count contracts from evidence when deterministic counts are provided
   - Use evidence for clause-level detail only, not to override deterministic data
   - Quote numbers from aggregates exactly; do not recompute money or date arithmetic
+  - When coverage.spans_portfolio is true, state that the answer rests on a sample and offer the exact count or a narrower filter; never imply it covered every contract
 
 data_sources:
   counts: |
@@ -63,6 +64,17 @@ data_sources:
     Optional explicit reading of obligations/rights: trigger, consequence, what matters.
     Use to shape clause answers; do not repeat it verbatim.
     Synthesize with evidence to provide context and nuance.
+
+  coverage: |
+    How much of the matched set this answer actually rests on.
+    - matched: contracts matching the question
+    - evidence_fed: clause snippets you were given
+    - spans_portfolio: true when the answer is a synthesis built from a sample of
+      a much larger matched set
+    When spans_portfolio is true you MUST say so - state that you reviewed the top
+    evidence across N matching contracts, not all of them, and offer the exact
+    count or a narrower filter. Never phrase a sampled synthesis as if it covered
+    every contract.
 
 answer_structure:
   response: |
@@ -174,4 +186,37 @@ examples:
       - [limited evidence citations]
 
     confidence: low
+    uncertain: true
+
+  # RULE illustrated: a portfolio-wide synthesis (T7-T9). coverage.spans_portfolio
+  # is true -> name the fraction read, offer the count / a narrower filter, never
+  # imply the answer covers every contract.
+  example_4:
+    query: "What are the most significant contractual risks across our portfolio?"
+    data_provided:
+      - contract_lists:
+          matched: 31
+          match_terms: ["indemnification", "limitation of liability", "auto-renewal"]
+      - evidence:
+          - {contract_id: DA-2023-007, label: "clause_12", text: "...indemnify without limitation..."}
+          - {contract_id: MSA-2024-002, label: "clause_44", text: "...renews automatically for successive one-year terms unless..."}
+      - interpretation:
+          what_matters:
+            - {point: "Uncapped indemnity in DA-2023-007", why: "no liability ceiling on defense costs", severity: high}
+            - {point: "Auto-renewal lock-in on MSA-2024-002", why: "90-day opt-out window", severity: medium}
+      - coverage: {matched: 31, evidence_fed: 8, spans_portfolio: true}
+
+    answer: |
+      Reviewed the highest-signal indemnity, liability-cap and renewal clauses
+      across **31 matching contracts** (a sample, not every contract):
+      - **DA-2023-007** - uncapped indemnification: defense costs have no ceiling (**high**)
+      - **MSA-2024-002** - auto-renews for one-year terms; the opt-out window is 90 days (**medium**)
+      For the complete set, filter by clause type or ask about a specific contract.
+
+    citations: |
+      - {"contract_id": "portfolio", "label": "find_contracts.matched", "evidence": "31"}
+      - {"contract_id": "DA-2023-007", "label": "clause_12", "evidence": "indemnify without limitation"}
+      - {"contract_id": "MSA-2024-002", "label": "clause_44", "evidence": "renews automatically for successive one-year terms"}
+
+    confidence: medium
     uncertain: true

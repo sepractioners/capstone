@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import os
 import sqlite3
 import tempfile
@@ -44,14 +45,17 @@ def test_query_handler_exposes_only_requested_organization_contracts() -> None:
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))])
 
         calls = AsyncMock(side_effect=[
-            _resp(query_agent_module._Plan(calls=[
+            _resp(query_agent_module._Plan(template="T6_clause_detail", calls=[
                 query_agent_module._ToolCall(tool="search_clauses", query="agreement")
             ])),
             _resp(query_agent_module._Interpretation()),
             _resp(QueryAnswer(answer="Grounded answer", confidence=0.9, citations=[])),
             _resp(query_agent_module._Verification(supported=True, adjusted_confidence=0.9)),
         ])
-        with patch("agent_llm.client.acompletion", new=calls), patch(
+        pinned = dataclasses.replace(query_agent_module.config, plan_tools=True, deterministic_compose=False)
+        with patch("agent_llm.client.acompletion", new=calls), patch.object(
+            query_agent_module, "config", pinned
+        ), patch(
             "query_agent.agent.rank_with_scores", side_effect=lambda q, r, k, c=None: ([(1.0, x) for x in r[:k]], {"mode": "test"})
         ):
             result = asyncio.run(analyze_contracts(

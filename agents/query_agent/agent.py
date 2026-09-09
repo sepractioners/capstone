@@ -89,6 +89,7 @@ class _ToolCall(BaseModel):
 
 
 class _Plan(BaseModel):
+    template: str = ""  # the named prompt template (see templates.yaml); fixes the tool allowlist
     reasoning: str = ""  # the tree: which kinds of question this is
     calls: list[_ToolCall] = Field(default_factory=list)
 
@@ -130,38 +131,58 @@ class _Interpretation(BaseModel):
 
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "contract_query.yaml"
+TEMPLATES_PATH = Path(__file__).parent / "prompts" / "templates.yaml"
 
-_PLAN_PROMPT = (
-    "You route a contract question to data tools. One question often has several needs at "
-    "once - resolve every one of them. Emit one call per distinct need (1 to 5).\n"
-    "FILTERS FIRST: the user message carries `facets` = the lifecycle_status and "
-    "contract_type values that actually exist in this portfolio. Every count / list / "
-    "aggregate / find call shares an optional filter - lifecycle_status, contract_type, "
-    "party (a counterparty name), effective_year, expiring_within_days (90 for 'next "
-    "quarter' - never compute a date), min_value / max_value. If the question names a "
-    "value from `facets.lifecycle_status` or `facets.contract_type`, you MUST copy that "
-    "exact facet string onto every call - use the facet spelling ('vendor-agreement'), "
-    "not the question's words ('vendor agreements'). Examples:\n"
-    "  'How many active vendor agreements?' -> count_contracts(lifecycle_status='active', contract_type='vendor-agreement')\n"
-    "  'List co-branding deals' -> list_contracts(contract_type='co-branding-agreement')\n"
-    "  'Which reseller contracts mention insurance?' -> find_contracts(contract_type='reseller-agreement', query='insurance')\n"
-    "- COUNT ('how many active', 'how many NDAs signed in 2024') -> count_contracts.\n"
-    "- LIST ('which contracts expire in the next quarter', 'list our active vendor "
-    "agreements', 'show every co-branding deal') -> list_contracts. detail='full' only for a "
-    "small tightly filtered set.\n"
-    "- WHICH-HAVE-CLAUSE / PORTFOLIO-WIDE CLAUSE ('which contracts require liability "
-    "insurance', 'do any have a non-compete', 'what are our payment obligations across all "
-    "contracts') -> find_contracts, `query` = the key phrase only ('liability insurance', "
-    "'payment'). Scans EVERY contract - use it, not search_clauses, for the full matching "
-    "set.\n"
-    "- MATH ('total value of active contracts', 'average value by contract type', 'how much "
-    "do we pay Acme') -> aggregate_contracts, measure = count|sum_value|avg_value|min_value|"
-    "max_value, group_by optional (lifecycle_status|contract_type|party). The tool does the "
-    "arithmetic.\n"
-    "- CLAUSE DETAIL for one/few contracts ('what does the indemnity clause say', 'explain "
-    "the termination terms in the Acme deal') -> search_clauses with a focused query.\n"
-    "Every call must use one of the five tool names. Return only the schema."
-)
+
+def _load_templates() -> tuple[dict[str, dict[str, Any]], str]:
+    """The routing spec (`templates.yaml`): id -> {tools, cues, scaffold, ...}
+    plus the fallback template id. See docs/query-agent-prompt-templates.md."""
+    import yaml
+
+    spec = yaml.safe_load(TEMPLATES_PATH.read_text(encoding="utf-8")) or {}
+    return spec.get("templates", {}) or {}, spec.get("fallback", "") or ""
+
+
+_TEMPLATES, _FALLBACK_TEMPLATE = _load_templates()
+_TEMPLATE_TOOLS: dict[str, set[str]] = {
+    tid: set(t.get("tools", []) or []) for tid, t in _TEMPLATES.items()
+}
+
+
+def _plan_prompt() -> str:
+    """Build the planner system prompt from the template catalogue so the two
+    never drift. The model names one template; that fixes its tool allowlist."""
+    lines = [
+        "Route a contract question. First name the single `template` whose cues best "
+        "fit the question; then emit one tool call per distinct need (1 to 5) using ONLY "
+        f"that template's tools. If nothing fits, use `{_FALLBACK_TEMPLATE}`.",
+        "",
+        "Every tool call is scoped to the caller's organization. Counts, sums and "
+        "date arithmetic are done by the tools - never compute a number or a date yourself.",
+        "",
+        "FILTERS: the user message carries `facets` = the lifecycle_status and "
+        "contract_type values that exist in this organization's portfolio. When the "
+        "question names one, copy the exact facet string ('vendor-agreement', not "
+        "'vendor agreements') onto every filterable call. Other filters: party, "
+        "effective_year, expiring_within_days (90 for 'next quarter' - never compute a "
+        "date), min_value / max_value.",
+        "",
+        "Templates:",
+    ]
+    for tid, t in _TEMPLATES.items():
+        tools = ", ".join(t.get("tools", []) or []) or "(no tools)"
+        lines.append(f"- {tid}  [tools: {tools}]")
+        scaffold = " ".join((t.get("scaffold") or "").split())
+        if scaffold:
+            lines.append(f"    {scaffold}")
+        cues = t.get("cues", []) or []
+        if cues:
+            lines.append(f"    cues: {' | '.join(str(c) for c in cues[:3])}")
+    lines += ["", "Return only the schema: {template, reasoning, calls}."]
+    return "\n".join(lines)
+
+
+_PLAN_PROMPT = _plan_prompt()
 _VERIFY_PROMPT = (
     "Check the drafted answer against the supplied data. The `counts`, `contract_lists`, and "
     "`aggregates` blocks are deterministic platform facts and are authoritative for numbers, "
@@ -173,6 +194,11 @@ _VERIFY_PROMPT = (
     "`contract_lists` answer must use its `matched`. "
     "Set supported=false if the answer contradicts those blocks, uses an unfiltered "
     "breakdown where `matched` applies, or the evidence does not back a clause-level claim. "
+    "COVERAGE: when `coverage.spans_portfolio` is true the answer was built from a sample "
+    "of a larger matched set - an answer that implies it covers every matching contract "
+    "('all our contracts', 'every contract', 'the portfolio as a whole') without saying it "
+    "read a sample is unsupported; it must state the fraction read and offer the exact "
+    "count or a narrower filter. "
     "List the labels of any citations nothing supports. Give a calibrated confidence in "
     "[0,1]. Return only the schema."
 )
@@ -320,88 +346,103 @@ def _clause_query(question: str, clause_hit: re.Match[str]) -> str:
     return clause_hit.group(0)
 
 
-def _default_plan(question: str, facets: dict[str, list[str]]) -> _Plan:
-    """Deterministic plan when the planner is disabled or returns nothing -
-    same keyword routing as the guard, from an empty plan."""
-    return _guard_plan(question, _Plan(reasoning="deterministic keyword routing"), facets, seeded=True)
-
-
 _FILTERABLE_TOOLS = {"count_contracts", "list_contracts", "find_contracts", "aggregate_contracts"}
 
+_FALLBACK_STOP_RE = re.compile(
+    r"\b(what|which|who|are|is|be|the|a|an|our|we|us|do|does|did|have|has|of|in|on|for|to|and|or|"
+    r"most|significant|important|big|biggest|major|key|main|across|all|any|each|every|portfolio|"
+    r"contracts?|agreements?|deals?|company|companies|tell|me|show|list|about)\b",
+    re.I,
+)
 
-def _guard_plan(question: str, plan: _Plan, facets: dict[str, list[str]], *, seeded: bool = False) -> _Plan:
-    """Add the deterministic call the planner obviously missed (or, when ``seeded``,
-    build the whole plan from keywords), and force the deterministic filter parse
-    onto every filterable call the planner left unscoped."""
-    calls = list(plan.calls[: config.max_tool_calls])
-    tools = {c.tool for c in calls}
+
+def _fallback_phrase(question: str) -> str:
+    """Key nouns from a question that fit no template - the search term for the
+    fallback retrieve+synthesise plan."""
+    words = [w for w in _FALLBACK_STOP_RE.sub(" ", question).split() if len(w) > 2]
+    return " ".join(words[:4]) or question.strip()
+
+
+def _deterministic_route(question: str, facets: dict[str, list[str]]) -> _Plan:
+    """Degraded-mode router (``QUERY_PLAN_TOOLS=0``): no model in the loop.
+    Keyword + facet routing for the deterministic templates. This is not the
+    architecture - it is the labelled offline fallback (ADR-0004 D4). Ambiguous
+    or open-ended questions fall through to ``_guard_plan``'s fixed fallback.
+    """
     where = _infer_where(question, facets)
-
-    # The planner - a small local model especially - routinely emits a count /
-    # list / aggregate / find call with no filter even when the question names a
-    # status or type. The planner picks the tools; the deterministic parse owns
-    # the scope. Fill any filter key the call is missing (never override one the
-    # planner set on purpose).
-    for call in calls:
-        if call.tool not in _FILTERABLE_TOOLS:
-            continue
-        for key, value in where.items():
-            if getattr(call, key, "") in ("", None):
-                setattr(call, key, value)
 
     def _mk(tool: str, **extra: Any) -> _ToolCall:
         return _ToolCall(tool=tool, **dict(where), **extra)
 
     clause_hit = _CLAUSE_RE.search(question)
     is_list = bool(_LIST_RE.search(question))
-    enumerate_clause = bool(clause_hit) and (is_list or bool(_SCOPE_RE.search(question)))
+    scoped = bool(_SCOPE_RE.search(question))
+    enumerate_clause = bool(clause_hit) and (is_list or scoped)
 
-    if enumerate_clause and "find_contracts" not in tools:
+    calls: list[_ToolCall] = []
+    template = ""
+    if enumerate_clause:
         calls.append(_mk("find_contracts", query=_clause_query(question, clause_hit)))
-        tools.add("find_contracts")
-
-    if _MATH_RE.search(question) and "aggregate_contracts" not in tools:
+        template = "T3_clause_presence"
+        if scoped:  # portfolio-wide clause question -> also gather evidence to synthesise
+            calls.append(_ToolCall(tool="search_clauses", query=question))
+            template = "T7_cross_contract_synthesis"
+    elif _MATH_RE.search(question):
         measure = "avg_value" if re.search(r"\b(average|avg|mean)\b", question, re.I) else "sum_value"
         group_by = "contract_type" if re.search(r"\bby (?:type|contract type)\b", question, re.I) else ""
         calls.append(_mk("aggregate_contracts", measure=measure, group_by=group_by))
-        tools.add("aggregate_contracts")
-
-    if _COUNT_RE.search(question) and "count_contracts" not in tools:
-        calls.insert(0, _mk("count_contracts"))
-        tools.add("count_contracts")
-
-    # A "which / show / find" question, or any filter parsed from the text, is an
-    # enumeration - list the matching contracts.
-    wants_list = (is_list or bool(where)) and not enumerate_clause
-    if wants_list and not tools & {"list_contracts", "count_contracts", "aggregate_contracts"}:
+        template = "T4_financial_rollup"
+    elif _COUNT_RE.search(question):
+        calls.append(_mk("count_contracts"))
+        template = "T1_portfolio_census"
+    elif is_list or where:
         calls.append(_mk("list_contracts"))
-        tools.add("list_contracts")
-
-    if not calls:
-        fallback = "search_clauses" if clause_hit else "count_contracts"
-        calls = [_ToolCall(tool="search_clauses", query=question) if clause_hit else _mk("count_contracts")]
-        tools.add(fallback)
-
-    # A clause search adds representative detail. Skip it for a pure "which
-    # contracts have <clause>" (already enumerated) or a purely structural
-    # count / list / math / filter question with no clause angle.
-    pure_enumeration = enumerate_clause and not _SCOPE_RE.search(question) and len(calls) == 1
-    structural_only = not clause_hit and (
-        bool(_COUNT_RE.search(question) or _MATH_RE.search(question) or _BREAKDOWN_RE.search(question))
-        or (is_list and not enumerate_clause)
-        or bool(where)
-        or (tools and not (tools - {"count_contracts", "list_contracts", "aggregate_contracts", "find_contracts"}))
-    )
-    if "search_clauses" not in tools and not pure_enumeration and not structural_only:
+        template = "T2_filtered_roster"
+    elif clause_hit:
         calls.append(_ToolCall(tool="search_clauses", query=question))
+        template = "T6_clause_detail"
 
-    return _Plan(reasoning=plan.reasoning, calls=calls[: config.max_tool_calls])
+    return _Plan(reasoning="deterministic keyword routing (degraded mode)", template=template, calls=calls)
+
+
+def _guard_plan(question: str, plan: _Plan, facets: dict[str, list[str]]) -> _Plan:
+    """Filter-value hygiene + template-allowlist enforcement. No tool selection.
+
+    - fill any filter key a call left empty from the deterministic parse (facet
+      spelling, relative dates, value bounds) - the planner picks tools, the
+      parse owns the scope;
+    - drop any call whose tool is not in the named template's allowlist;
+    - if nothing usable remains (and the template is not the no-tool escalation),
+      fall back to the retrieve + synthesise template - never a bare count.
+    """
+    where = _infer_where(question, facets)
+    allow = _TEMPLATE_TOOLS.get(plan.template)  # None -> unknown / blank template, allow anything
+
+    kept: list[_ToolCall] = []
+    for call in plan.calls[: config.max_tool_calls]:
+        if allow is not None and call.tool not in allow:
+            continue
+        if call.tool in _FILTERABLE_TOOLS:
+            for key, value in where.items():
+                if getattr(call, key, "") in ("", None):
+                    setattr(call, key, value)
+        kept.append(call)
+
+    template = plan.template
+    if not kept and template != "T12_out_of_scope":
+        template = _FALLBACK_TEMPLATE
+        kept = [
+            _ToolCall(tool="find_contracts", query=_fallback_phrase(question), **dict(where)),
+            _ToolCall(tool="search_clauses", query=question),
+        ]
+    return _Plan(template=template, reasoning=plan.reasoning, calls=kept[: config.max_tool_calls])
 
 
 async def _plan(question: str, history_text: str, facets: dict[str, list[str]], rec: TraceRecorder) -> _Plan:
     if not config.plan_tools:
-        plan = _default_plan(question, facets)
-        rec.record("plan", context={"question": question}, output=plan.model_dump(mode="json"), note="planner disabled - QUERY_PLAN_TOOLS=0")
+        plan = _guard_plan(question, _deterministic_route(question, facets), facets)
+        rec.record("plan", context={"question": question}, output=plan.model_dump(mode="json"),
+                   note="degraded mode - QUERY_PLAN_TOOLS=0, deterministic routing")
         return plan
     parsed = await _call(
         _PLAN_PROMPT,
@@ -509,7 +550,7 @@ def _row_name(row: dict[str, Any]) -> str:
     return str(row.get("title") or row.get("contract_number") or row.get("id") or "?")
 
 
-def _compose_deterministic(question: str, gathered: dict[str, Any]) -> QueryAnswer | None:
+def _compose_deterministic(question: str, gathered: dict[str, Any], coverage: dict[str, Any] | None = None) -> QueryAnswer | None:
     """Template an answer straight from tool output. Returns None when the
     question needs language-model synthesis (no structured results, or the
     caller gathered clause snippets). Structural questions - count, filtered
@@ -526,6 +567,7 @@ def _compose_deterministic(question: str, gathered: dict[str, Any]) -> QueryAnsw
 
     parts: list[str] = []
     cites: list[Citation] = []
+    capped = False
 
     for c in counts:
         flt = c.get("filter") or {}
@@ -545,8 +587,12 @@ def _compose_deterministic(question: str, gathered: dict[str, Any]) -> QueryAnsw
 
     for lst in lists:
         rows = lst.get("contracts") or []
+        matched_n = int(lst.get("matched", len(rows)) or 0)
         names = [_row_name(r) for r in rows[:_NAME_LIMIT]]
-        more = "" if len(rows) <= _NAME_LIMIT else f", and {len(rows) - _NAME_LIMIT} more"
+        shortfall = max(len(rows), matched_n) - len(names)
+        more = "" if shortfall <= 0 else f", and {shortfall} more"
+        if shortfall > 0 or lst.get("truncated"):
+            capped = True
         terms = lst.get("match_terms")
         if terms:
             label, kind = "find_contracts.matched", f" mention {' + '.join(terms)}"
@@ -568,7 +614,10 @@ def _compose_deterministic(question: str, gathered: dict[str, Any]) -> QueryAnsw
 
     if not parts:
         return None
-    return QueryAnswer(answer=" ".join(parts), confidence=0.9, uncertain=False, citations=cites)
+    partial = capped or bool(coverage and coverage.get("truncated"))
+    if partial:
+        parts.append("This list is capped - ask for a narrower filter or the full set for every match.")
+    return QueryAnswer(answer=" ".join(parts), confidence=0.9, uncertain=partial, citations=cites)
 
 
 def _fmt_filter(flt: dict[str, Any]) -> str:
@@ -596,11 +645,35 @@ def _trim_lists_for_draft(lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return trimmed
 
 
+def _coverage(gathered: dict[str, Any]) -> dict[str, Any]:
+    """How much of the matched set the answer actually rests on. When a synthesis
+    is built from top-K evidence over a larger matched set, the answer must say
+    so (`spans_portfolio`) and offer the exact count / a narrower filter."""
+    matched = 0
+    listing_truncated = False
+    for lst in gathered.get("lists") or []:
+        m = int(lst.get("matched") or 0)
+        matched = max(matched, m)
+        rows = lst.get("contracts") or []
+        if lst.get("truncated") or (m and len(rows) < m):
+            listing_truncated = True
+    evidence_fed = len(gathered.get("snippets") or [])
+    spans = evidence_fed > 0 and matched > _DRAFT_LIST_ROWS
+    return {
+        "matched": matched,
+        "evidence_fed": evidence_fed,
+        "names_shown": min(matched, _NAME_LIMIT) if matched else 0,
+        "truncated": bool(listing_truncated or spans),
+        "spans_portfolio": bool(spans),
+    }
+
+
 async def _draft_answer(
     question: str,
     history_text: str,
     gathered: dict[str, Any],
     interpretation: _Interpretation | None,
+    coverage: dict[str, Any],
     rec: TraceRecorder,
 ) -> QueryAnswer:
     parsed = await _call(
@@ -613,6 +686,7 @@ async def _draft_answer(
             "aggregates": gathered["aggregates"],
             "evidence": gathered["snippets"][: config.evidence_budget],
             "interpretation": _interpretation_view(interpretation),
+            "coverage": coverage,
         },
         QueryAnswer,
         rec,
@@ -628,6 +702,7 @@ async def _verify(
     draft: QueryAnswer,
     gathered: dict[str, Any],
     interpretation: _Interpretation | None,
+    coverage: dict[str, Any],
     rec: TraceRecorder,
 ) -> QueryAnswer:
     cited = [c.model_dump() for c in draft.citations]
@@ -641,6 +716,7 @@ async def _verify(
             "contract_lists": _trim_lists_for_draft(gathered["lists"]),
             "aggregates": gathered["aggregates"],
             "interpretation": _interpretation_view(interpretation),
+            "coverage": coverage,
         },
         _Verification,
         rec,
@@ -747,13 +823,16 @@ async def answer(
     scratchpad["what_matters"] = [m.point for m in interpretation.what_matters] if interpretation else []
     rec.record("scratchpad", memory=scratchpad)
 
-    draft = _compose_deterministic(question, gathered) if config.deterministic_compose else None
+    coverage = _coverage(gathered)
+    rec.record("coverage", memory=coverage)
+
+    draft = _compose_deterministic(question, gathered, coverage) if config.deterministic_compose else None
     if draft is not None:
         rec.record("draft_answer", note="deterministic compose - structural question, no clause evidence",
                    output=draft.model_dump(mode="json"))
     else:
-        draft = await _draft_answer(question, history_text, gathered, interpretation, rec)
-    verified = await _verify(question, draft, gathered, interpretation, rec) if config.verify else draft
+        draft = await _draft_answer(question, history_text, gathered, interpretation, coverage, rec)
+    verified = await _verify(question, draft, gathered, interpretation, coverage, rec) if config.verify else draft
     if not config.verify:
         rec.record("verify", note="skipped - QUERY_VERIFY=0")
     rec.record("result", output=verified.model_dump(mode="json"))
