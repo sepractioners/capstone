@@ -12,10 +12,12 @@ set -euo pipefail
 #   3. Creating Python virtual environment and syncing dependencies
 #   4. Installing mkcert and generating HTTPS certificates for local development
 #   5. Initializing and seeding the SQLite database (web + domain schema)
-#   6. Setting up Ollama (local LLM) with required models
-#   7. Downloading sample contracts from CUAD dataset
-#   8. Building RAG knowledge index for extraction agent
-#   9. Installing Node.js dependencies for frontend and admin console (bun/npm)
+#   6. Seeding a synthetic validation portfolio (40 contracts) so the query
+#      agent has data to answer against straight after setup
+#   7. Setting up Ollama (local LLM) with required models
+#   8. Downloading sample contracts from CUAD dataset
+#   9. Building RAG knowledge index for extraction agent
+#   10. Installing Node.js dependencies for frontend and admin console (bun/npm)
 #
 # PREREQUISITES:
 #   - Python 3.11 or higher
@@ -51,17 +53,20 @@ log_error() { echo -e "${RED}✗ $1${NC}"; }
 # Parse arguments
 SETUP_OLLAMA=true
 SETUP_SAMPLE_DATA=true
+SETUP_VALIDATION_DATA=true
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --no-ollama) SETUP_OLLAMA=false; shift ;;
     --no-sample-data) SETUP_SAMPLE_DATA=false; shift ;;
+    --no-validation-data) SETUP_VALIDATION_DATA=false; shift ;;
     -h|--help) sed -n '4,46p' "$0"; cat << 'EOF'
 
 OPTIONS:
-  --no-ollama        Skip Ollama installation check (use if you have cloud LLM)
-  --no-sample-data   Skip downloading sample contracts
-  -h, --help         Show this help message
+  --no-ollama            Skip Ollama installation check (use if you have cloud LLM)
+  --no-sample-data       Skip downloading sample contracts
+  --no-validation-data   Skip seeding the synthetic validation portfolio
+  -h, --help             Show this help message
 
 EXAMPLES:
   bash scripts/setup-mac.sh
@@ -195,6 +200,21 @@ log_step "Creating database schema at $DB_FILE..."
 python -m clm_web.db --init
 log_step "Seeding database with default tenant and admin user..."
 uv run python seed_database.py --skip-cuad --skip-faiss
+
+# Seed the synthetic validation portfolio: deterministic, offline, no LLM.
+# seed_contracts.py builds ContractCandidate objects from a fixed seed and
+# ingests them through the real handler, then binds them to the Capstone org so
+# the query agent has data to answer against the moment setup finishes.
+# Idempotent per --seed, so re-running setup is safe.
+if [ "$SETUP_VALIDATION_DATA" = true ]; then
+  log_step "Seeding synthetic validation portfolio (40 contracts, offline)..."
+  if uv run python synthetic_data_loader/seed_contracts.py --seed capstone-review-2026 --count 40 --database-path "$DB_FILE"; then
+    log_ok "Validation portfolio seeded (seed: capstone-review-2026)"
+  else
+    log_warn "Validation portfolio seeding failed - the platform is still usable; seed later with:"
+    log_warn "  uv run python synthetic_data_loader/seed_contracts.py --seed capstone-review-2026 --count 40"
+  fi
+fi
 deactivate
 log_ok "SQLite database ready at $DB_FILE"
 

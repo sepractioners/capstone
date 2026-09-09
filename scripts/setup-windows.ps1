@@ -10,16 +10,19 @@
     3. Creating Python virtual environment and syncing dependencies
     4. Installing mkcert and generating HTTPS certificates for local development
     5. Initializing and seeding the SQLite database (web + domain schema)
-    6. Setting up Ollama (local LLM) with required models
-    7. Downloading sample contracts from CUAD dataset
-    8. Building RAG knowledge index for extraction agent
-    9. Installing Node.js dependencies for frontend and admin console (bun/npm)
+    6. Seeding a synthetic validation portfolio (40 contracts) so the query
+       agent has data to answer against straight after setup
+    7. Setting up Ollama (local LLM) with required models
+    8. Downloading sample contracts from CUAD dataset
+    9. Building RAG knowledge index for extraction agent
+    10. Installing Node.js dependencies for frontend and admin console (bun/npm)
 
     CREATES:
     - .venv/              Python virtual environment
     - .certs/             HTTPS certificates for local development
     - .env                Configuration file (copied from .env.example)
-    - clm.sqlite3         SQLite database (web + domain schema, seeded tenant/admin)
+    - clm.sqlite3         SQLite database (web + domain schema, seeded tenant/admin,
+                          + 40-contract synthetic validation portfolio)
     - synthetic_data_loader/rag_knowledge.sqlite3  RAG vector index
     - web/*/node_modules  Node.js dependencies
 
@@ -28,6 +31,10 @@
 
 .PARAMETER NoSampleData
     Skip downloading sample contracts from CUAD dataset
+
+.PARAMETER NoValidationData
+    Skip seeding the synthetic validation portfolio (deterministic, offline,
+    no LLM). Leave it on so reviewers can query the agent immediately.
 
 .PARAMETER NoFrontend
     Skip frontend dependency installation
@@ -59,6 +66,7 @@
 param(
     [switch]$NoOllama,           # Skip Ollama setup
     [switch]$NoSampleData,       # Skip sample contract download
+    [switch]$NoValidationData,   # Skip seeding the synthetic validation portfolio
     [switch]$NoFrontend          # Skip frontend dependency installation
 )
 
@@ -194,6 +202,22 @@ if ($LASTEXITCODE -ne 0) { deactivate; Write-Error2 "Database initialization fai
 Write-Step "Seeding database with default tenant and admin user..."
 uv run python seed_database.py --skip-cuad --skip-faiss
 if ($LASTEXITCODE -ne 0) { deactivate; Write-Error2 "Database seeding failed"; exit 1 }
+
+# === 8b. Seed the synthetic validation portfolio ===
+# Deterministic, offline, no LLM: seed_contracts.py builds ContractCandidate
+# objects from a fixed seed and ingests them through the real handler, then
+# binds them to the Capstone org so the query agent has data to answer against
+# the moment setup finishes. Idempotent per --seed, so re-running setup is safe.
+if (-not $NoValidationData) {
+    Write-Step "Seeding synthetic validation portfolio (40 contracts, offline)..."
+    uv run python synthetic_data_loader/seed_contracts.py --seed capstone-review-2026 --count 40 --database-path $DbFile
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Validation portfolio seeding failed - the platform is still usable; seed later with:"
+        Write-Warn "  uv run python synthetic_data_loader/seed_contracts.py --seed capstone-review-2026 --count 40"
+    } else {
+        Write-Ok "Validation portfolio seeded (seed: capstone-review-2026)"
+    }
+}
 deactivate
 Write-Ok "SQLite database ready at $DbFile"
 

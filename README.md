@@ -11,7 +11,11 @@ An intelligent contract platform that uses AI agents to automatically **extract 
 - 📊 **Track obligations**: Automatically capture what each party owes, payment terms, renewal dates
 - 🛡️ **Identify risks**: Flag missing terms, unusual provisions, compliance gaps
 
-**How it works:** AI agents read contracts using Gemma4 (local LLM), retrieve similar examples from a CUAD knowledge base via semantic search, and store results in SQLite. Access via web portal, CLI, or REST API. Local-first by default (Ollama); switch to cloud LLMs (Claude, GPT-4) anytime.
+**How it works:** Two agents with different jobs.
+- **Extraction** reads uploaded PDFs page by page with a local LLM (Gemma4), grounded by similar examples retrieved from a CUAD-derived knowledge base, and writes structured clauses/obligations/dates to SQLite.
+- **Query** answers organization-wide questions *about the contracts already stored*. It plans a set of tool calls, runs **deterministic** tools for every count, list, sum, and date filter (the model never does the arithmetic), adds embedding-ranked clause search only for clause-detail questions, then drafts an answer with citations and verifies it. It cannot retrieve anything the Query MCP did not return, and a provider failure ends the run rather than producing a guess.
+
+Access via web portal, CLI, or REST API. Local-first by default (Ollama); switch to cloud LLMs (Claude, GPT-4) anytime.
 
 ---
 
@@ -34,39 +38,75 @@ An intelligent contract platform that uses AI agents to automatically **extract 
 ## 🚀 Quick Start
 
 ### 1. Setup (One Step)
-The setup script handles everything: Python env, dependencies, HTTPS certs, database, .env config, sample data, and RAG index.
+The setup script handles everything: Python env, dependencies, HTTPS certs, database, `.env` config, and a **synthetic validation portfolio (40 contracts)** so the query agent has data to answer against immediately. It also downloads CUAD sample contracts and builds the RAG index for the extraction agent.
 
 **macOS:** `bash scripts/setup-mac.sh`  
 **Linux:** `bash scripts/setup-linux.sh`  
 **Windows:** `.\scripts\setup-windows.ps1`
 
-See `--help` for options (e.g., `--no-sample-data` to skip contracts).
+Options: `--no-sample-data` skips the CUAD download; `--no-validation-data` skips the synthetic portfolio; `--no-ollama` for cloud LLMs. See `--help`.
 
 ### 2. Start Services
 ```bash
-bash scripts/run-all.sh              # Start everything
-bash scripts/run-all.sh --bootstrap  # First run: create admin account
+bash scripts/run-all.sh --bootstrap  # First run: also creates the admin account
+bash scripts/run-all.sh              # Subsequent runs
 bash scripts/run-all.sh --stop       # Stop everything
 ```
-
-Logs in `.run/`. Syncs Python and Node dependencies by default.
+On Windows: `.\scripts\run-all.ps1 -Bootstrap`. Logs in `.run/`.
 
 ### 3. Access the Platform
 
-**Web Interfaces:**
-- **Portal** (https://localhost:5173) — Upload contracts, chat with query agent, track obligations
-- **Admin Console** (https://localhost:5174) — View agent execution traces, debug reasoning (admin only)
-- **API** (https://localhost:8443) — Programmatic access, OpenAPI docs at `/docs`
+| Interface | URL | Use |
+|---|---|---|
+| **Portal** | https://localhost:5173 | Upload contracts, chat with the query agent, track obligations |
+| **Admin Console** | https://localhost:5174 | Agent execution traces, reasoning debug (admin only) |
+| **API** | https://localhost:8443 | REST + OpenAPI docs at `/docs` |
 
-**Login:** `admin@capstone.local` / `CapstoneAdmin!2026`
+**Built-in review account** (created by `--bootstrap`, local use only — not a production credential):
 
-**CLI Tool:**
-```bash
-bash scripts/agent.sh ask "Which contracts expire this quarter?"
-bash scripts/agent.sh task "Extract obligations" --file ./contract.pdf
-bash scripts/agent.sh ask "Show clauses" --contract-id <uuid>  # Scope to one contract
-bash scripts/agent.sh chat                                      # Interactive mode
 ```
+Email:    admin@capstone.local
+Password: CapstoneAdmin!2026
+```
+
+### 4. Quick tour with the agent CLI
+
+`clm-agent` is an authenticated HTTP/SSE client of the running API — it does **not** call the database or MCP directly, so **the API must be running** (step 2) before any command.
+
+**The `scripts/agent` wrapper authenticates for you.** It logs in with the built-in review account above, obtains a bearer token, and runs `clm-agent` — you do not paste a token:
+
+```bash
+# macOS / Linux                              # Windows PowerShell
+bash scripts/agent.sh ask "..."              .\scripts\agent.ps1 ask "..."
+```
+
+Try these against the seeded validation portfolio (expected results in the
+[Validation Data](#-validation-data--limitations) section):
+
+```bash
+bash scripts/agent.sh ask "How many contracts do we have, by lifecycle status?"
+bash scripts/agent.sh ask "How many active vendor agreements?"
+bash scripts/agent.sh ask "List all co-branding agreements"
+bash scripts/agent.sh ask "Which contracts mention liability insurance?"
+bash scripts/agent.sh ask "What payment obligations do we have across all contracts?"
+bash scripts/agent.sh ask "Break down contracts by type"
+bash scripts/agent.sh chat                                      # interactive
+bash scripts/agent.sh ask "Show the clauses" --contract-id <uuid>
+```
+
+Use a **different account** or a raw `clm-agent` call: pass credentials to the wrapper —
+`bash scripts/agent.sh --email you@org.test --password 'secret' ask "..."` — or get a
+token yourself and export it:
+
+```bash
+TOKEN=$(curl -sk -X POST https://localhost:8443/auth/token \
+  -d 'grant_type=password&username=admin@capstone.local&password=CapstoneAdmin!2026' \
+  | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+export CLM_AGENT_TOKEN="$TOKEN" CLM_API_URL="https://localhost:8443"
+uv run clm-agent ask "How many contracts do we have?"
+```
+
+Without `CLM_AGENT_TOKEN`, `clm-agent` prompts for a bearer token interactively. Add `--json` to `ask` / `task` / `extract` for machine-readable output.
 
 ---
 
@@ -75,7 +115,7 @@ bash scripts/agent.sh chat                                      # Interactive mo
 | Agent | Input | Process | Output | MCP |
 |-------|-------|---------|--------|-----|
 | **Extraction** | PDF file | Per-page LLM extraction + RAG examples | Clauses, obligations, dates, parties, risks | `extraction_mcp_server` (write) |
-| **Query** | Question + history | Semantic search → LLM synthesis | Grounded answer + sources | `query_mcp_server` (read) |
+| **Query** | Question + history | Plan → deterministic tools + clause search → draft → verify | Grounded answer + sources + confidence | `query_mcp_server` (read-only) |
 
 **Extraction workflow:**
 1. Split PDF into pages
@@ -84,11 +124,69 @@ bash scripts/agent.sh chat                                      # Interactive mo
 4. Validate (retry if confidence <70%; escalate if <50% after retry)
 5. Persist via MCP server
 
-**Query workflow:**
-1. Convert question to embeddings
-2. Semantic search SQLite for relevant clauses
-3. LLM synthesizes answer grounded in results
-4. Return with source citations
+**Query workflow (`plan → gather → interpret → draft → verify`):**
+1. **Plan** — one LLM call classifies the question and emits one tool call per distinct need (a count, a filtered list, a clause lookup can all be in one question). Deterministic keyword guards add any tool the planner missed, including relative-date (`expiring in 90 days`) and value (`over $1M`) filters.
+2. **Gather** — run the planned calls:
+   - `count_contracts` / `list_contracts` / `aggregate_contracts` — exact counts, lists, and count/sum/avg/min/max of contract value. **All arithmetic happens here; the model never computes numbers.**
+   - `find_contracts` — every contract whose clause/obligation text contains a phrase (complete enumeration).
+   - `search_clauses` — embedding-ranked clause snippets, only for one-/few-contract detail questions.
+3. **Interpret** — for clause snippets, build a trigger → consequence → "what matters" view (best-effort).
+4. **Draft** — synthesise across counts, lists, and clause evidence with citations, a confidence value, and an uncertainty flag.
+5. **Verify** — counts and lists are authoritative for numbers; clause claims must be backed by cited evidence.
+
+The Query MCP re-checks organization membership on every call. The agent cannot retrieve outside what the MCP returns; a provider failure returns a terminal run failure, not a fabricated answer.
+
+---
+
+## 🧪 Validation Data & Limitations
+
+### What setup seeds
+
+Setup runs `synthetic_data_loader/seed_contracts.py --seed capstone-review-2026 --count 40`. This is a **deterministic, offline** generator: it builds `ContractCandidate` objects from a fixed random seed (no LLM, no network) and ingests them through the same handler a real upload uses, then binds them to the `Capstone` organization. Re-running setup is idempotent.
+
+The `capstone-review-2026` snapshot is exactly:
+
+| Lifecycle status | Count | | Contract type | Count |
+|---|---|---|---|---|
+| active | 24 | | distribution-agreement | 7 |
+| approved | 15 | | master-services-agreement | 6 |
+| in_review | 1 | | services-agreement | 5 |
+| | | | amendment | 4 |
+| **Total** | **40** | | co-branding-agreement | 4 |
+| | | | affiliate-agreement | 4 |
+| | | | vendor-agreement | 3 |
+| | | | reseller-agreement | 3 |
+| | | | license-agreement | 3 |
+| | | | nda | 1 |
+
+Each contract persists: parties (country code + role), 7 clauses with full text (Payment Terms, Governing Law, Term and Termination, plus a rotating set incl. Insurance, Indemnification, Limitation of Liability…), 1–3 obligations with descriptions and due dates, and an expiration date. Party names, clause set, and dates come from fixed pools, so re-seeding anywhere reproduces the same portfolio.
+
+**Expected answers for the quick-tour questions:**
+
+| Question | Answer |
+|---|---|
+| contracts by lifecycle status | active **24**, approved **15**, in_review **1** |
+| active vendor agreements | **2** |
+| co-branding agreements | **4** |
+| contracts mentioning liability insurance | **13** (Insurance clause) |
+| breakdown by type | distribution 7, MSA 6, services 5, amendment/co-branding/affiliate 4, vendor/reseller/license 3, nda 1 |
+
+### What this validates
+
+The synthetic portfolio exercises the **query agent's reasoning**: planning multi-part questions, choosing filters, complete enumeration across types, and — above all — that counts are computed by deterministic tools rather than the model. A wrong answer here is attributable to the agent, not to data variance.
+
+### What it does *not* validate
+
+- **Real drafting variation.** Clauses come from a fixed template pool, so `find_contracts` (literal phrase match) and `search_clauses` (embeddings) are not stressed the way real contract language would.
+- **Extraction accuracy.** These contracts are generated already-structured; no PDF is parsed. Extraction is validated separately — `uv run python -m platform_testing.extraction_eval`.
+- **Value / effective-date questions.** The current seed path persists expiration dates and clause/obligation text but **not** `contract_value`, `effective_date`, or `execution_date` (dropped in the `seed_contracts.py` → `ingest_contract` mapping — a known gap). So `aggregate_contracts` sum/avg and "signed in 2024" filters return empty on this portfolio.
+- **Messy entity resolution, multi-currency aggregation, jurisdiction nuance.** The generator is tidy by construction.
+
+For depth on those, the CUAD dataset (opt-in) provides real contracts. The dataset strategy — offline-first defaults, a single contract-type catalog, and a real-contract stress corpus — is written up in [docs/adr/](docs/adr/) (ADR-0001…0003, currently *Proposed*).
+
+### CUAD grounding
+
+The extraction agent's knowledge base is derived from the Contract Understanding Atticus Dataset (CUAD, CC BY 4.0). It is US-centric — the underlying contracts are SEC (EDGAR) filings — so contract-type profiles and retrieved examples carry a **US-jurisdiction bias**.
 
 ---
 
@@ -128,27 +226,29 @@ User uploads PDF
 **Query Pipeline (Answer questions about contracts):**
 ```
 User asks: "Which contracts expire this quarter?"
-  → Nomic embeddings convert question to vector
-  → SQLite semantic search finds relevant clauses
-  → Gemma4 synthesizes answer from retrieved clauses
-  → Return with source citations
+  → Gemma4 plans tool calls (here: list_contracts + expiring_within_days filter)
+  → Deterministic tools run over stored contracts (SQL, no LLM math)
+  → search_clauses (embeddings) only if the question needs clause text
+  → Gemma4 drafts the answer from tool results, with citations + confidence
+  → Verify: counts/lists authoritative; clause claims need cited evidence
 ```
 
 **Why this design:**
-- Gemma4: Reasoning + extraction logic
-- Nomic embeddings: Semantic search over contract text
-- SQLite: Fast local storage with vector search
-- RAG: Provides examples → extraction consistency
-- Result: Answers grounded in actual contracts (no hallucination)
+- Gemma4: plans the question and drafts the prose — but not the numbers
+- Deterministic tools: every count, sum, and date filter (auditable, exact)
+- Nomic embeddings: clause-level semantic search, scoped to detail questions
+- SQLite: fast local storage
+- RAG (extraction only): CUAD examples → extraction consistency
+- Result: answers grounded in the stored contracts, numbers computed not guessed
 
 ---
 
 ## 🗄️ Two SQLite Databases
 
-- **clm.sqlite3** — Domain data (contracts, obligations, users, organizations)
-- **rag_knowledge.sqlite3** — Training signal (embeddings of CUAD clauses for semantic search)
+- **clm.sqlite3** — Domain data (contracts, obligations, users, organizations). **This is what the query agent reads.**
+- **rag_knowledge.sqlite3** — Extraction-agent knowledge base (contract-type profiles + CUAD clause embeddings). Used only when *extracting* a new PDF; the query agent does not touch it.
 
-Separation intentional: domain data evolves with user work; training data improves agent quality.
+Separation intentional: domain data evolves with user work; the knowledge base improves extraction quality.
 
 ---
 
@@ -166,7 +266,7 @@ Separation intentional: domain data evolves with user work; training data improv
 **Utilities:**
 - [tools/contract_calc/](tools/contract_calc/) — Date and money calculations
 - [platform_testing/](platform_testing/) — Deterministic scenarios + evaluation
-- [synthetic_data_loader/](synthetic_data_loader/) — CUAD dataset download + RAG indexing
+- [synthetic_data_loader/](synthetic_data_loader/) — Synthetic validation portfolio (`seed_contracts.py`), CUAD download + RAG indexing
 
 **Documentation:**
 - [docs/](docs/) — Architecture, design principles, memory model, data lifecycle
@@ -197,6 +297,8 @@ See [SETUP.md](SETUP.md) for troubleshooting.
 **Query agent scope in Portal**: When opened while viewing a contract, searches all tenant contracts instead of scoping to that contract.
 - **Workaround (CLI)**: `bash scripts/agent.sh ask "Show clauses" --contract-id <uuid>` (works perfectly)
 - **Workaround (Portal)**: Mention contract explicitly in query: "In contract ABC, show me..."
+
+**Synthetic seed drops some fields**: `seed_contracts.py` → `ingest_contract` does not persist `contract_value`, `effective_date`, or `execution_date`, so value-aggregation and effective-date questions return empty on the validation portfolio. Clause/obligation text and expiration dates are persisted. See [Validation Data & Limitations](#-validation-data--limitations).
 
 ---
 
