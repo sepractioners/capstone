@@ -11,11 +11,12 @@ flowchart LR
     API --> History["conversation_window + rolling summary\n(role + text only)"]
     API --> MCP["query_mcp_server\nanalyze_contracts / count / list / find / aggregate_contracts / search_clauses"]
     MCP --> Scope["contract_tenants\ntenant filter"]
-    Scope --> Plan["_plan() - tree of thought\nclassify question -> tool calls (+ where filter)"]
+    Scope --> Plan["_plan() - name a prompt template (templates.yaml)\n-> tool calls within its allowlist\n_guard_plan: filter-value hygiene only"]
     Plan --> Gather["_gather()\ncount / list / find / aggregate_contracts (portfolio.py, exact; dates + money math)\nsearch_clauses (flatten + embedding rank)"]
     Gather --> Interpret["_interpret() - clause branch only\ntrigger -> consequence -> what matters"]
-    Interpret --> Draft["compose\nstructural: _compose_deterministic() (no LLM)\nclause synthesis: _draft_answer() (LLM)"]
-    Draft --> Verify["_verify()\ncounts authoritative; clause claims vs cited evidence"]
+    Interpret --> Coverage["_coverage()\nmatched vs read; spans_portfolio?"]
+    Coverage --> Draft["compose\nstructural: _compose_deterministic() (no LLM)\nclause synthesis: _draft_answer() (LLM)"]
+    Draft --> Verify["_verify()\ncounts authoritative; clause claims vs cited evidence;\nno false completeness while coverage is partial"]
     Verify --> Result["Answer + citations +\nconfidence + uncertainty"]
     Result --> Stream
 ```
@@ -26,7 +27,7 @@ flowchart LR
 2. The API validates the bearer token and derives the organization context; the client never supplies trusted tenant identity.
 3. The orchestrator assembles the conversation `history` (rolling summary + recent turns, text only), records the run, and emits a safe `retrieving_evidence` event.
 4. The query MCP verifies the organization owns every selected contract and maps authorized snapshots. `count_contracts`, `list_contracts`, and `search_clauses` return deterministically with no LLM; `analyze_contracts` calls `answer()`.
-5. `answer()` **plans** (one LLM call classifies the question and emits one tool call per need with an optional `where` filter; `QUERY_PLAN_TOOLS=0` uses deterministic keyword + facet routing instead, and keyword guards always add the tool / relative-date / value filters the planner missed and force the inferred filter onto unscoped calls), **gathers** by running every call (`portfolio.py` for exact counts / lists / clause enumeration / value math, embedding-ranked `search_clauses` for snippets), **interprets** clause snippets when present, **composes** the answer (deterministic template from tool output for structural questions; an LLM draft only when clause snippets were gathered), and **verifies** it (deterministic blocks authoritative; `matched` is the answer when a filter is set; clause claims checked against citations).
+5. `answer()` **plans** (one LLM call names a prompt template — [`templates.yaml`](../prompts/templates.yaml), catalogue [`docs/query-agent-prompt-templates.md`](../../../docs/query-agent-prompt-templates.md) — and emits one tool call per need using only that template's tools; `QUERY_PLAN_TOOLS=0` is a degraded mode that routes by deterministic keyword + facet matching to the deterministic templates only. `_guard_plan` does filter-value hygiene only: it normalises facet spelling, forces a relative-date / value / facet filter parsed from the text onto an unscoped call, and drops any call outside the template allowlist — no tool selection. A question that fits no template routes to the `T9_risk_exposure_review` fallback, never a bare count), **gathers** by running every call (`portfolio.py` for exact counts / lists / clause enumeration / value math, embedding-ranked `search_clauses` for snippets), **interprets** clause snippets when present, records **coverage** (matched set vs what the model read), **composes** the answer (deterministic template from tool output for structural questions; an LLM draft only when clause snippets were gathered), and **verifies** it (deterministic blocks authoritative; `matched` is the answer when a filter is set; clause claims checked against citations; an answer implying it covered every contract while coverage is partial is rejected). See [ADR-0004](../../../docs/adr/0004-query-agent-routing-and-retrieval.md).
 6. The orchestrator persists and streams the answer or terminal failure. It never streams hidden reasoning, tokens, raw source files, or provider secrets.
 
 ## Knowledge and Memory

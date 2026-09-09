@@ -4,6 +4,16 @@
 deleted files. This document collates every benchmark fact that exists for the
 query agent; nothing here is a new run.*
 
+> **Update (routing overhaul).** The routing described below (`_guard_plan`
+> keyword tool-selection, `QUERY_PLAN_TOOLS=0` as the effective default) has been
+> replaced — see [ADR-0004](adr/0004-query-agent-routing-and-retrieval.md) and
+> [the prompt-template catalogue](query-agent-prompt-templates.md). Routing is now
+> a named prompt template per question; `_guard_plan` is filter-value hygiene
+> only; `q14` routes to `T9_risk_exposure_review` instead of a bare count. The
+> committed baseline (`platform_testing/reports/query-probe-20260909T182544Z.*`)
+> is the *pre-overhaul* picture; re-run the probe
+> (`platform_testing/probe/query_agent_probe.py`) for the current one.
+
 ---
 
 ## 0. Provenance of the source material
