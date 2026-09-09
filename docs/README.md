@@ -9,9 +9,13 @@ Cross-module documentation belongs here. Module-specific documentation remains b
 - [Design Principles](design-principles.md) - Core values guiding architecture
 - [Agentic Solution Architecture](agentic-architecture.md) - Three agents, orchestration, memory model, and guardrails
 - [Data Lifecycle](data-lifecycle.md) - How contract data flows through the system
-- [Offline Data and RAG Sync](offline-data-and-rag-sync.md) - Decision brief: removing the Kaggle dependency, catalog-driven contract types, dataset strategy
 - [Memory and Reasoning](memory-and-reasoning.md) - Working, episodic, and semantic memory models
 - [System Map Legacy](system-map-legacy.md) - Original combined architecture diagram (historical reference)
+
+## Decisions
+
+- [Architecture Decision Records](adr/README.md) - Significant architectural decisions, their context and consequences
+  - [ADR-0001](adr/0001-offline-first-contract-data-and-type-catalog.md) (Proposed) - Offline-first contract data and a single contract-type catalog
 
 ## Domain and Implementation
 
