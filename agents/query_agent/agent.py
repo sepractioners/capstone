@@ -387,9 +387,10 @@ def _guard_plan(question: str, plan: _Plan, facets: dict[str, list[str]], *, see
     # count / list / math / filter question with no clause angle.
     pure_enumeration = enumerate_clause and not _SCOPE_RE.search(question) and len(calls) == 1
     structural_only = not clause_hit and (
-        bool(_COUNT_RE.search(question) or _MATH_RE.search(question))
+        bool(_COUNT_RE.search(question) or _MATH_RE.search(question) or _BREAKDOWN_RE.search(question))
         or (is_list and not enumerate_clause)
         or bool(where)
+        or (tools and not (tools - {"count_contracts", "list_contracts", "aggregate_contracts", "find_contracts"}))
     )
     if "search_clauses" not in tools and not pure_enumeration and not structural_only:
         calls.append(_ToolCall(tool="search_clauses", query=question))
