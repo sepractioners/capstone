@@ -178,3 +178,64 @@ class WebDatabase:
             connection.commit()
         finally:
             connection.close()
+
+
+def initialize_database(database_path: str) -> None:
+    """Create every table the platform needs in ``database_path``.
+
+    This covers both the web/identity/agent tables owned by
+    :class:`WebDatabase` and the contract_lifecycle *domain* tables
+    (``contracts``, ``domain_events``, ``document_blobs``). The domain
+    tables are otherwise only created lazily the first time the API
+    process imports its dependencies, so a fresh checkout that inspects
+    or seeds the database before the server has ever run would find them
+    missing. Every statement is ``CREATE TABLE IF NOT EXISTS`` /
+    ``INSERT OR IGNORE``, so this is safe to run repeatedly.
+    """
+    WebDatabase(database_path)
+
+    # Import lazily so this module keeps working even if the domain
+    # package layout changes; the web package depends on it at runtime.
+    from contract_lifecycle.infrastructure.sqlite import (
+        ContractSchema,
+        DocumentBlobSchema,
+        SqliteConnectionFactory,
+    )
+
+    connection = SqliteConnectionFactory(database_path).connect()
+    try:
+        ContractSchema().create_all(connection)
+        DocumentBlobSchema().create_all(connection)
+    finally:
+        connection.close()
+
+
+def _main(argv: list[str] | None = None) -> int:
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(
+        prog="python -m clm_web.db",
+        description="Initialize the CLM SQLite database (web + domain schema).",
+    )
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Create all tables if they do not already exist.",
+    )
+    parser.add_argument(
+        "--database",
+        default=os.environ.get("CLM_DATABASE_PATH", "clm.sqlite3"),
+        help="Path to the SQLite database (default: $CLM_DATABASE_PATH or clm.sqlite3).",
+    )
+    args = parser.parse_args(argv)
+
+    # --init is the only mode today; treat a bare invocation the same way
+    # so the command is never a silent no-op.
+    initialize_database(args.database)
+    print(f"[OK] Database schema ready at {args.database}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

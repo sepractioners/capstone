@@ -5,11 +5,11 @@
 
 .DESCRIPTION
     Prepares the complete Capstone development environment by:
-    1. Verifying Python 3.11+ and installing uv (fast package manager)
-    2. Creating Python virtual environment and syncing dependencies
-    3. Installing mkcert and generating HTTPS certificates for local development
-    4. Initializing SQLite database with schema
-    5. Creating .env configuration file with default LLM settings
+    1. Creating .env from .env.example (if missing) and telling you it did
+    2. Verifying Python 3.11+ and installing uv (fast package manager)
+    3. Creating Python virtual environment and syncing dependencies
+    4. Installing mkcert and generating HTTPS certificates for local development
+    5. Initializing and seeding the SQLite database (web + domain schema)
     6. Setting up Ollama (local LLM) with required models
     7. Downloading sample contracts from CUAD dataset
     8. Building RAG knowledge index for extraction agent
@@ -18,8 +18,8 @@
     CREATES:
     - .venv/              Python virtual environment
     - .certs/             HTTPS certificates for local development
-    - .env                Configuration file with LLM and database settings
-    - capstone.db         SQLite database
+    - .env                Configuration file (copied from .env.example)
+    - clm.sqlite3         SQLite database (web + domain schema, seeded tenant/admin)
     - synthetic_data_loader/rag_knowledge.sqlite3  RAG vector index
     - web/*/node_modules  Node.js dependencies
 
@@ -83,7 +83,26 @@ function Test-Command {
 Write-Step "Capstone Project Setup for Windows"
 Write-Host ""
 
-# === 1. Verify Python installation ===
+# === 1. Create .env configuration file ===
+# Done first so the developer can review/edit it before the rest of setup
+# runs, and so CLM_DATABASE_PATH / EXTRACTION_RAG_DB resolve to the same
+# values the app uses at runtime.
+$EnvFile = Join-Path $Root ".env"
+if (Test-Path $EnvFile) {
+    Write-Ok ".env already exists - leaving it untouched"
+} else {
+    Copy-Item (Join-Path $Root ".env.example") $EnvFile
+    Write-Host ""
+    Write-Host "  ----------------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host "  Created .env from .env.example" -ForegroundColor Yellow
+    Write-Host "  Defaults: local Ollama (LLM_PROVIDER=ollama, model gemma4:latest)." -ForegroundColor Yellow
+    Write-Host "  Edit .env now if you want Anthropic/OpenRouter or a different model" -ForegroundColor Yellow
+    Write-Host "  or database path - then re-run this script." -ForegroundColor Yellow
+    Write-Host "  ----------------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+# === 2. Verify Python installation ===
 Write-Step "Checking Python installation..."
 if (Test-Command python) {
     $pythonVersion = python --version 2>&1
@@ -94,7 +113,7 @@ if (Test-Command python) {
     exit 1
 }
 
-# === 2. Verify or install uv ===
+# === 3. Verify or install uv ===
 Write-Step "Checking uv (Python package manager)..."
 if (Test-Command uv) {
     $uvVersion = uv --version
@@ -108,7 +127,7 @@ if (Test-Command uv) {
     exit 1
 }
 
-# === 3. Create Python virtual environment ===
+# === 4. Create Python virtual environment ===
 Write-Step "Setting up Python virtual environment..."
 cd $Root
 
@@ -120,12 +139,12 @@ if (Test-Path $VenvPath) {
     Write-Ok "Virtual environment created"
 }
 
-# === 4. Install Python dependencies ===
+# === 5. Install Python dependencies ===
 Write-Step "Installing Python dependencies..."
 uv sync --all-packages
 Write-Ok "Python dependencies installed"
 
-# === 5. Check for mkcert ===
+# === 6. Check for mkcert ===
 Write-Step "Checking mkcert (HTTPS certificate tool)..."
 if (Test-Command mkcert) {
     Write-Ok "mkcert installed"
@@ -141,7 +160,7 @@ if (Test-Command mkcert) {
     exit 1
 }
 
-# === 6. Generate HTTPS certificates ===
+# === 7. Generate HTTPS certificates ===
 if (Test-Path (Join-Path $CertsPath "localhost.pem")) {
     Write-Ok "HTTPS certificates already exist"
 } else {
@@ -151,65 +170,32 @@ if (Test-Path (Join-Path $CertsPath "localhost.pem")) {
     Write-Ok "HTTPS certificates generated"
 }
 
-# === 7. Initialize SQLite database ===
+# === 8. Initialize and seed the SQLite database ===
 Write-Step "Initializing SQLite database..."
-$DbFile = Join-Path $Root "capstone.db"
-
-if (Test-Path $DbFile) {
-    Write-Ok "SQLite database already exists"
-} else {
-    Write-Step "Creating database..."
-    .\.venv\Scripts\Activate.ps1
-    python -m web.clm_web.db --init
-    deactivate
-    Write-Ok "SQLite database initialized"
+# Read CLM_DATABASE_PATH from .env or use default
+$DbPath = "./clm.sqlite3"
+$EnvDbLine = Get-Content $EnvFile | Select-String "^CLM_DATABASE_PATH="
+if ($EnvDbLine) {
+    $DbPath = $EnvDbLine.Line.Split("=", 2)[1].Trim()
 }
+$DbFile = Join-Path $Root $DbPath
 
-# === 8. Create .env file ===
-$EnvFile = Join-Path $Root ".env"
-if (Test-Path $EnvFile) {
-    Write-Ok ".env already exists"
-} else {
-    Write-Step "Creating .env configuration file..."
-    $EnvContent = @(
-        "# LLM Provider Configuration",
-        "# Options: anthropic, ollama, openrouter",
-        "LLM_PROVIDER=ollama",
-        "LLM_MODEL=gemma4:latest",
-        "",
-        "# Ollama Configuration (for local LLM)",
-        "OLLAMA_HOST=http://127.0.0.1:11434",
-        "",
-        "# Embedding Configuration",
-        "EMBEDDING_MODEL=nomic-embed-text:latest",
-        "EMBEDDING_URL=http://127.0.0.1:11434/api/embed",
-        "",
-        "# Extraction Agent Configuration",
-        "EXTRACTION_RAG_ENABLED=1",
-        "EXTRACTION_RAG_DB=synthetic_data_loader/rag_knowledge.sqlite3",
-        "EXTRACTION_RAG_VECTOR_BACKEND=sqlite",
-        "",
-        "# Query Agent Configuration",
-        "QUERY_PLAN_TOOLS=1",
-        "QUERY_INTERPRET=1",
-        "QUERY_VERIFY=1",
-        "",
-        "# Platform Testing",
-        "PLATFORM_TESTING_EVALUATE=0",
-        "",
-        "# Timeouts (seconds)",
-        "LLM_TIMEOUT_SECONDS=300",
-        "QUERY_FAST_TIMEOUT_SECONDS=120",
-        "",
-        "# Maximum steps",
-        "PLANNER_MAX_STEPS=3",
-        "",
-        "# Database",
-        "DATABASE_URL=sqlite:///./capstone.db"
-    ) -join "`n"
-    $EnvContent | Out-File -FilePath $EnvFile -Encoding UTF8
-    Write-Ok ".env created with default values"
-}
+# Schema creation and seeding are both idempotent (CREATE TABLE IF NOT EXISTS /
+# seed script self-skips when a tenant already exists). Run them every time:
+# the database file is often created as a side effect of importing the app
+# before the tenant/admin user has ever been seeded, so gating on the file's
+# existence would silently leave the platform unusable (no org, no login).
+.\.venv\Scripts\Activate.ps1
+$env:CLM_DATABASE_PATH = $DbPath
+Write-Step "Creating database schema at $DbFile..."
+python -m clm_web.db --init
+if ($LASTEXITCODE -ne 0) { deactivate; Write-Error2 "Database initialization failed"; exit 1 }
+
+Write-Step "Seeding database with default tenant and admin user..."
+uv run python seed_database.py --skip-cuad --skip-faiss
+if ($LASTEXITCODE -ne 0) { deactivate; Write-Error2 "Database seeding failed"; exit 1 }
+deactivate
+Write-Ok "SQLite database ready at $DbFile"
 
 # === 9. Set up Ollama (optional) ===
 if (-not $NoOllama) {
@@ -274,16 +260,24 @@ if (-not $NoSampleData) {
 
 # === 11. Build RAG index ===
 Write-Step "Building RAG knowledge index..."
-$RagDbFile = Join-Path $Root "synthetic_data_loader" "rag_knowledge.sqlite3"
+# Read EXTRACTION_RAG_DB from .env or use default
+$RagPath = "synthetic_data_loader/rag_knowledge.sqlite3"
+$EnvRagLine = Get-Content $EnvFile | Select-String "^EXTRACTION_RAG_DB="
+if ($EnvRagLine) {
+    $RagPath = $EnvRagLine.Line.Split("=", 2)[1].Trim()
+}
+$RagDbFile = Join-Path $Root $RagPath
 
 if (-not (Test-Path $RagDbFile)) {
-    Write-Step "Building RAG index (first run, may take a minute)..."
+    Write-Step "Building RAG index at $RagDbFile (first run, may take a minute)..."
     .\.venv\Scripts\Activate.ps1
+    $env:EXTRACTION_RAG_DB = $RagPath
     python -m extraction_agent.build_rag_index
+    if ($LASTEXITCODE -ne 0) { deactivate; Write-Error2 "RAG index build failed"; exit 1 }
     deactivate
     Write-Ok "RAG index built"
 } else {
-    Write-Ok "RAG index already exists"
+    Write-Ok "RAG index already exists at $RagDbFile"
 }
 
 # === 12. Install frontend and admin console dependencies ===
@@ -321,7 +315,7 @@ Write-Host "1. Start Ollama (if using local LLM):"
 Write-Host "   ollama serve"
 Write-Host ""
 Write-Host "2. Start the applications:"
-Write-Host "   .\scripts\run-all.ps1 -Sync -Bootstrap"
+Write-Host "   .\scripts\run-all.ps1 -Bootstrap"
 Write-Host ""
 Write-Host "3. Access the portal:"
 Write-Host "   Contract Portal:    https://localhost:5173"

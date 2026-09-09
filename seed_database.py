@@ -7,12 +7,23 @@ import json
 import logging
 import os
 import sqlite3
+import sys
 import uuid
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 
+# Windows consoles default to a legacy code page (cp1252) that cannot encode
+# the status glyphs / non-ASCII contract filenames this script prints, which
+# otherwise crashes seeding partway through with UnicodeEncodeError. Force the
+# standard streams to UTF-8 where the runtime supports it.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass
+
 # Web database setup
-from web.clm_web.db import WebDatabase
+from web.clm_web.db import WebDatabase, initialize_database
 
 # RAG setup
 from agents.extraction_agent.hybrid_rag import initialize as initialize_rag, add_records as add_rag_records
@@ -61,11 +72,11 @@ def download_cuad_contracts(
 
     try:
         result_dir = download_subset(categories, limit=limit)
-        print(f"✓ Downloaded contracts to {result_dir}")
+        print(f"[OK] Downloaded contracts to {result_dir}")
         return result_dir
     except Exception as e:
         logger.warning(f"Failed to download CUAD: {e}")
-        print(f"⚠ CUAD download failed: {e}")
+        print(f"[WARN] CUAD download failed: {e}")
         print("  Ensure Kaggle credentials are configured (kagglehub.cache_dir)")
         raise
 
@@ -129,7 +140,7 @@ def load_cuad_to_rag(
     pdfs = sorted(data_dir.glob("*.pdf"))
 
     if not pdfs:
-        print(f"⚠ No PDF files found in {data_dir}")
+        print(f"[WARN] No PDF files found in {data_dir}")
         return records
 
     print(f"  Found {len(pdfs)} PDF files")
@@ -140,14 +151,14 @@ def load_cuad_to_rag(
         contract_data = extract_contract_from_pdf(pdf_path)
         if contract_data:
             records.append(contract_data)
-            print("✓")
+            print("[OK]")
         else:
-            print("⊘ (skipped)")
+            print("[skip]")
 
     if records:
         print(f"  Indexing {len(records)} contracts in RAG database...")
         add_rag_records(records, rag_db_path)
-        print(f"✓ Added {len(records)} contracts to RAG")
+        print(f"[OK] Added {len(records)} contracts to RAG")
 
     return records
 
@@ -201,10 +212,37 @@ SAMPLE_RAG_KNOWLEDGE = [
 
 
 def create_web_database(db_path: str) -> WebDatabase:
-    """Initialize the web application database."""
-    print(f"Creating web database at {db_path}...")
-    db = WebDatabase(db_path)
-    return db
+    """Initialize the web application database *and* the domain schema.
+
+    ``initialize_database`` creates both the web/identity/agent tables and
+    the contract_lifecycle domain tables (contracts, domain_events,
+    document_blobs) so the database is fully usable before the API server
+    has ever started.
+    """
+    print(f"Creating database schema at {db_path}...")
+    initialize_database(db_path)
+    return WebDatabase(db_path)
+
+
+def _repair_admin_password(connection: sqlite3.Connection) -> None:
+    """Rewrite the seeded admin password hash if an earlier seed run stored it
+    in a format the API's ``verify_password`` (scrypt only) cannot check."""
+    row = connection.execute(
+        "SELECT password_hash FROM users WHERE email = ?", (CAPSTONE_USER_EMAIL.lower(),)
+    ).fetchone()
+    if row is None:
+        return
+    current = row[0] if not isinstance(row, sqlite3.Row) else row["password_hash"]
+    if isinstance(current, str) and current.startswith("scrypt$"):
+        return
+    from web.clm_web.security import hash_password
+
+    connection.execute(
+        "UPDATE users SET password_hash = ? WHERE email = ?",
+        (hash_password(CAPSTONE_USER_PASSWORD), CAPSTONE_USER_EMAIL.lower()),
+    )
+    connection.commit()
+    print(f"[OK] Repaired admin password hash for {CAPSTONE_USER_EMAIL}")
 
 
 def seed_web_database(db_path: str, cuad_records: list[dict] | None = None) -> None:
@@ -225,7 +263,8 @@ def seed_web_database(db_path: str, cuad_records: list[dict] | None = None) -> N
         # Check if already seeded
         org_count = connection.execute("SELECT COUNT(*) as cnt FROM organizations").fetchone()[0]
         if org_count > 0:
-            print("✓ Web database already seeded, skipping...")
+            print("[OK] Web database already seeded, skipping...")
+            _repair_admin_password(connection)
             return
 
         # Add Capstone organization/tenant
@@ -235,13 +274,15 @@ def seed_web_database(db_path: str, cuad_records: list[dict] | None = None) -> N
             (CAPSTONE_ORG_ID, CAPSTONE_ORG_NAME, now)
         )
 
-        # Add admin user
+        # Add admin user. Use the API's own password hasher (scrypt) - a plain
+        # sha256 digest here is rejected by verify_password at login, which
+        # leaves the seeded admin unable to sign in.
         print(f"  Adding admin user: {CAPSTONE_USER_EMAIL}")
-        from hashlib import sha256
-        password_hash = sha256(CAPSTONE_USER_PASSWORD.encode()).hexdigest()
+        from web.clm_web.security import hash_password
+        password_hash = hash_password(CAPSTONE_USER_PASSWORD)
         connection.execute(
             "INSERT INTO users (id, email, password_hash, display_name, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (CAPSTONE_USER_ID, CAPSTONE_USER_EMAIL, password_hash, "Admin", 1, now)
+            (CAPSTONE_USER_ID, CAPSTONE_USER_EMAIL.lower(), password_hash, "Admin", 1, now)
         )
 
         # Add membership
@@ -261,7 +302,7 @@ def seed_web_database(db_path: str, cuad_records: list[dict] | None = None) -> N
                 )
 
         connection.commit()
-        print("✓ Web database seeded successfully")
+        print("[OK] Web database seeded successfully")
     finally:
         connection.close()
 
@@ -280,7 +321,7 @@ def seed_rag_database(db_path: str) -> None:
     connection.close()
 
     if existing > 0:
-        print("✓ RAG database already seeded, skipping...")
+        print("[OK] RAG database already seeded, skipping...")
         return
 
     # Add knowledge records
@@ -289,7 +330,7 @@ def seed_rag_database(db_path: str) -> None:
         print(f"    - {record['name']}")
 
     add_rag_records(SAMPLE_RAG_KNOWLEDGE, db_path)
-    print("✓ RAG knowledge base seeded successfully")
+    print("[OK] RAG knowledge base seeded successfully")
 
 
 def create_rag_vector_index(db_path: str, index_path: str | None = None) -> None:
@@ -302,32 +343,36 @@ def create_rag_vector_index(db_path: str, index_path: str | None = None) -> None
 
         index_file = Path(index_path)
         if index_file.exists():
-            print(f"✓ FAISS index already exists at {index_path}")
+            print(f"[OK] FAISS index already exists at {index_path}")
             return
 
         print(f"Building FAISS vector index...")
         index_file = build_index(db_path, index_path)
-        print(f"✓ FAISS index created at {index_file}")
+        print(f"[OK] FAISS index created at {index_file}")
     except ImportError:
-        print("⚠ FAISS not installed; skipping vector index creation")
+        print("[WARN] FAISS not installed; skipping vector index creation")
         print("  Install with: pip install faiss-cpu")
     except Exception as e:
-        print(f"⚠ Could not build FAISS index: {e}")
+        print(f"[WARN] Could not build FAISS index: {e}")
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Seed CLM database with tenant data, CUAD contracts, and RAG indices"
     )
+    # Read database paths from environment or use defaults
+    default_web_db = os.environ.get("CLM_DATABASE_PATH", "clm.sqlite3")
+    default_rag_db = os.environ.get("EXTRACTION_RAG_DB", "synthetic_data_loader/rag_knowledge.sqlite3")
+
     parser.add_argument(
         "--web-db",
-        default="data/clm_web.sqlite3",
-        help="Path to web application database (default: data/clm_web.sqlite3)"
+        default=default_web_db,
+        help=f"Path to web application database (default: {default_web_db})"
     )
     parser.add_argument(
         "--rag-db",
-        default="synthetic_data_loader/rag_knowledge.sqlite3",
-        help="Path to RAG knowledge database (default: synthetic_data_loader/rag_knowledge.sqlite3)"
+        default=default_rag_db,
+        help=f"Path to RAG knowledge database (default: {default_rag_db})"
     )
     parser.add_argument(
         "--faiss-index",
@@ -404,7 +449,7 @@ def main():
             if not args.skip_rag:
                 cuad_records = load_cuad_to_rag(cuad_dir, args.rag_db)
         except Exception as e:
-            print(f"\n⚠ CUAD seeding failed: {e}")
+            print(f"\n[WARN] CUAD seeding failed: {e}")
             print("  Continuing with web database and procedural knowledge only...")
             args.skip_cuad = True
 
@@ -422,7 +467,7 @@ def main():
         connection = initialize_rag(args.rag_db)
         connection.close()
         add_rag_records(SAMPLE_RAG_KNOWLEDGE, args.rag_db)
-        print(f"✓ Added {len(SAMPLE_RAG_KNOWLEDGE)} procedural knowledge records")
+        print(f"[OK] Added {len(SAMPLE_RAG_KNOWLEDGE)} procedural knowledge records")
 
     # Build FAISS index
     if not args.skip_rag and not args.skip_faiss:
@@ -441,7 +486,8 @@ def main():
     print(f"\nKAGGLE CUAD Contracts: {len(cuad_records)}")
     print(f"Procedural Knowledge: {len(SAMPLE_RAG_KNOWLEDGE)} records")
     print("\nNext steps:")
-    print("  1. Start the web server: python -m web.clm_web.server")
+    print("  1. Start the platform:  scripts/run-all.ps1 -Bootstrap  (Windows)")
+    print("                          bash scripts/run-all.sh --bootstrap  (macOS/Linux)")
     print("  2. Access the application at https://localhost:5173")
     print(f"  3. Login with {CAPSTONE_USER_EMAIL} / {CAPSTONE_USER_PASSWORD}")
 

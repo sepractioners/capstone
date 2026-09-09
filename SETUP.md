@@ -4,11 +4,11 @@ A complete guide to setting up the Contract Lifecycle Management Platform on you
 
 ## Quick Start
 
-### macOS
+### macOS / Linux
 ```bash
-bash scripts/setup-mac.sh       # Setup everything
+bash scripts/setup-mac.sh       # Setup everything (setup-linux.sh on Linux)
 ollama serve                    # Start LLM (new terminal)
-bash scripts/run-mac.sh         # Start apps
+bash scripts/run-all.sh         # Start apps
 ```
 
 ### Windows
@@ -34,17 +34,21 @@ See [system-requirements.toml](system-requirements.toml) for all dependencies an
 
 ## What the Setup Scripts Do
 
+- ✅ **First:** create `.env` from `.env.example` if it's missing, and print a
+  notice so you can stop and edit it (LLM provider, model, DB path). An
+  existing `.env` is never overwritten.
 - ✅ Install system dependencies (Python, Git, SQLite, OpenSSL, mkcert, uv)
 - ✅ Create Python virtual environment and install packages
 - ✅ Generate HTTPS certificates for localhost
-- ✅ Initialize SQLite database
-- ✅ Create `.env` configuration file
+- ✅ Initialize **and seed** the SQLite database (web + domain schema, Capstone
+  org, `admin@capstone.local`) — idempotent, runs on every setup
 - ✅ Download sample CUAD contracts (optional)
 - ✅ Build RAG knowledge index
 - ✅ Install frontend dependencies (bun or npm)
 - ✅ Pull Ollama models (optional)
 
-No manual steps needed - the scripts handle everything!
+The default `.env` uses local Ollama. If you want Anthropic/OpenRouter, edit
+`.env` after the first run and run the setup script again.
 
 ## Manual Setup (if not using setup scripts)
 
@@ -52,7 +56,7 @@ If you prefer to set things up manually, follow the detailed steps for your plat
 
 - **macOS**: See `scripts/setup-mac.sh` for exact commands
 - **Windows**: See `scripts/setup-windows.ps1` for exact commands
-- **Linux**: Create similar script based on macOS version (apt-get instead of brew)
+- **Linux**: See `scripts/setup-linux.sh` for exact commands
 
 Or just check [system-requirements.toml](system-requirements.toml) for all dependencies and run the setup scripts!
 
@@ -74,10 +78,10 @@ cd capstone
 source .venv/bin/activate
 
 # macOS/Linux
-bash scripts/run-mac.sh
+bash scripts/run-all.sh
 
 # OR Windows
-powershell -ExecutionPolicy Bypass -File scripts/run-all.ps1 -Sync -Bootstrap
+powershell -ExecutionPolicy Bypass -File scripts/run-all.ps1 -Bootstrap
 ```
 
 This starts:
@@ -226,12 +230,12 @@ mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem localh
 ```bash
 # SQLite database may be locked if another process holds it
 # Kill existing processes
-pkill -f "python -m clm_web.server"
-pkill -f "python -m clm_web.db"
+pkill -f "clm_web.server"
 
-# Optionally reset database (deletes all data)
-rm capstone.db
-python -m web.clm_web.db --init
+# Optionally reset the database (deletes all data), then recreate + reseed
+rm clm.sqlite3
+python -m clm_web.db --init
+python seed_database.py --skip-cuad --skip-faiss
 ```
 
 ### Port Already in Use
@@ -241,7 +245,7 @@ If ports 5173, 5174, or 8443 are already in use:
 # Check what's using the port (macOS)
 lsof -i :8443
 
-# Change ports in scripts/run-mac.sh or run-all.ps1:
+# Change ports in scripts/run-all.sh or run-all.ps1:
 # -ApiPort 8444 -FrontendPort 5275 -ConsolePort 5275
 ```
 
@@ -269,7 +273,7 @@ lsof -i :8443
 capstone/
 ├── .certs/                    # Local HTTPS certificates (gitignored)
 ├── .venv/                     # Python virtual environment (gitignored)
-├── capstone.db                # SQLite database (gitignored)
+├── clm.sqlite3                # SQLite database - web + domain schema (gitignored)
 ├── .env                       # Configuration (gitignored)
 ├── agents/                    # Extraction/Query/Orchestrator agents
 ├── app/                       # Domain & application layer
@@ -282,7 +286,9 @@ capstone/
 │   └── rag_knowledge.sqlite3  # RAG index (built)
 └── scripts/
     ├── setup-mac.sh           # Automated setup for macOS
-    ├── run-mac.sh             # Start all apps (macOS)
+    ├── setup-linux.sh         # Automated setup for Linux
+    ├── setup-windows.ps1      # Automated setup for Windows
+    ├── run-all.sh             # Start all apps (macOS/Linux)
     └── run-all.ps1            # Start all apps (Windows)
 ```
 

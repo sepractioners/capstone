@@ -7,11 +7,11 @@ set -euo pipefail
 #
 # WHAT THIS SCRIPT DOES:
 #   Prepares the complete Capstone development environment by:
-#   1. Verifying Python 3.11+ and installing uv (fast package manager)
-#   2. Creating Python virtual environment and syncing dependencies
-#   3. Installing mkcert and generating HTTPS certificates for local development
-#   4. Initializing SQLite database with schema
-#   5. Creating .env configuration file with default LLM settings
+#   1. Creating .env from .env.example (if missing) and telling you it did
+#   2. Verifying Python 3.11+ and installing uv (fast package manager)
+#   3. Creating Python virtual environment and syncing dependencies
+#   4. Installing mkcert and generating HTTPS certificates for local development
+#   5. Initializing and seeding the SQLite database (web + domain schema)
 #   6. Setting up Ollama (local LLM) with required models
 #   7. Downloading sample contracts from CUAD dataset
 #   8. Building RAG knowledge index for extraction agent
@@ -30,8 +30,8 @@ set -euo pipefail
 # WHAT IT CREATES:
 #   - .venv/              Python virtual environment
 #   - .certs/             HTTPS certificates for local development
-#   - .env                Configuration file with LLM and database settings
-#   - capstone.db         SQLite database
+#   - .env                Configuration file (copied from .env.example)
+#   - clm.sqlite3         SQLite database (web + domain schema, seeded tenant/admin)
 #   - synthetic_data_loader/rag_knowledge.sqlite3  RAG vector index
 #   - web/*/node_modules  Node.js dependencies
 #
@@ -82,7 +82,24 @@ done
 log_step "Capstone Project Setup for Linux/Git Bash"
 echo ""
 
-# === 1. Detect environment ===
+# === 1. Create .env configuration file ===
+# Done first so you can review/edit it before the rest of setup runs, and so
+# CLM_DATABASE_PATH / EXTRACTION_RAG_DB resolve to the values the app uses.
+if [ -f "$ROOT/.env" ]; then
+  log_ok ".env already exists - leaving it untouched"
+else
+  cp "$ROOT/.env.example" "$ROOT/.env"
+  echo ""
+  log_warn "----------------------------------------------------------------"
+  log_warn "Created .env from .env.example"
+  log_warn "Defaults: local Ollama (LLM_PROVIDER=ollama, model gemma4:latest)."
+  log_warn "Edit .env now for Anthropic/OpenRouter or a different model/db path,"
+  log_warn "then re-run this script."
+  log_warn "----------------------------------------------------------------"
+  echo ""
+fi
+
+# === 2. Detect environment ===
 if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "win32" ]]; then
   log_ok "Running on Windows (Git Bash)"
   IS_WINDOWS=true
@@ -94,7 +111,7 @@ else
   IS_WINDOWS=false
 fi
 
-# === 2. Check Python ===
+# === 3. Check Python ===
 log_step "Checking Python installation..."
 if command -v python3.12 &> /dev/null; then
   PY_CMD="python3.12"
@@ -113,7 +130,7 @@ else
   exit 1
 fi
 
-# === 3. Check or install uv ===
+# === 4. Check or install uv ===
 log_step "Checking uv (Python package manager)..."
 if command -v uv &> /dev/null; then
   log_ok "uv already installed"
@@ -124,7 +141,7 @@ else
   log_ok "uv installed"
 fi
 
-# === 4. Create Python virtual environment ===
+# === 5. Create Python virtual environment ===
 log_step "Setting up Python virtual environment..."
 cd "$ROOT"
 
@@ -135,12 +152,12 @@ else
   log_ok "Virtual environment already exists"
 fi
 
-# === 5. Install Python dependencies ===
+# === 6. Install Python dependencies ===
 log_step "Installing Python dependencies..."
 uv sync --all-packages
 log_ok "Python dependencies installed"
 
-# === 6. Check for mkcert ===
+# === 7. Check for mkcert ===
 log_step "Checking mkcert (HTTPS certificate tool)..."
 if command -v mkcert &> /dev/null; then
   log_ok "mkcert already installed"
@@ -165,7 +182,7 @@ else
   fi
 fi
 
-# === 7. Generate HTTPS certificates ===
+# === 8. Generate HTTPS certificates ===
 if [ ! -d ".certs" ]; then
   log_step "Generating local HTTPS certificates..."
   mkdir -p .certs
@@ -175,67 +192,31 @@ else
   log_ok "HTTPS certificates already exist"
 fi
 
-# === 8. Initialize SQLite database ===
+# === 9. Initialize and seed the SQLite database ===
 log_step "Initializing SQLite database..."
-DB_FILE="$ROOT/capstone.db"
+DB_PATH=$(grep "^CLM_DATABASE_PATH=" .env | cut -d= -f2- | tr -d '[:space:]')
+DB_PATH="${DB_PATH:-./clm.sqlite3}"
+DB_FILE="$ROOT/$DB_PATH"
 
-if [ ! -f "$DB_FILE" ]; then
-  # Handle both Unix and Windows paths for venv activation
-  if [ -f ".venv/bin/activate" ]; then
-    source .venv/bin/activate
-  elif [ -f ".venv/Scripts/activate" ]; then
-    source .venv/Scripts/activate
-  fi
-  python -m web.clm_web.db --init
-  deactivate
-  log_ok "SQLite database initialized"
-else
-  log_ok "SQLite database already exists"
+# Handle both Unix and Windows paths for venv activation
+if [ -f ".venv/bin/activate" ]; then
+  source .venv/bin/activate
+elif [ -f ".venv/Scripts/activate" ]; then
+  source .venv/Scripts/activate
 fi
 
-# === 9. Set up environment variables ===
-if [ ! -f ".env" ]; then
-  log_step "Creating .env configuration file..."
-  cat > .env << 'EOF'
-# LLM Provider Configuration
-# Options: anthropic, ollama, openrouter
-LLM_PROVIDER=ollama
-LLM_MODEL=gemma4:latest
-
-# Ollama Configuration (for local LLM)
-OLLAMA_HOST=http://127.0.0.1:11434
-
-# Embedding Configuration
-EMBEDDING_MODEL=nomic-embed-text:latest
-EMBEDDING_URL=http://127.0.0.1:11434/api/embed
-
-# Extraction Agent Configuration
-EXTRACTION_RAG_ENABLED=1
-EXTRACTION_RAG_DB=synthetic_data_loader/rag_knowledge.sqlite3
-EXTRACTION_RAG_VECTOR_BACKEND=sqlite
-
-# Query Agent Configuration
-QUERY_PLAN_TOOLS=1
-QUERY_INTERPRET=1
-QUERY_VERIFY=1
-
-# Platform Testing
-PLATFORM_TESTING_EVALUATE=0
-
-# Timeouts (seconds)
-LLM_TIMEOUT_SECONDS=300
-QUERY_FAST_TIMEOUT_SECONDS=120
-
-# Maximum steps
-PLANNER_MAX_STEPS=3
-
-# Database
-DATABASE_URL=sqlite:///./capstone.db
-EOF
-  log_ok ".env created with default values"
-else
-  log_ok ".env already exists"
-fi
+# Schema creation and seeding are both idempotent (CREATE TABLE IF NOT EXISTS /
+# the seed script self-skips when a tenant already exists). Run them every time:
+# the database file is often created as a side effect of importing the app
+# before the tenant/admin user has ever been seeded, so gating on the file's
+# existence would silently leave the platform unusable (no org, no login).
+export CLM_DATABASE_PATH="$DB_PATH"
+log_step "Creating database schema at $DB_FILE..."
+python -m clm_web.db --init
+log_step "Seeding database with default tenant and admin user..."
+uv run python seed_database.py --skip-cuad --skip-faiss
+deactivate
+log_ok "SQLite database ready at $DB_FILE"
 
 # === 10. Set up Ollama (optional) ===
 if [ "$SETUP_OLLAMA" = true ]; then
@@ -311,12 +292,17 @@ elif [ -f ".venv/Scripts/activate" ]; then
   source .venv/Scripts/activate
 fi
 
-if [ ! -f "synthetic_data_loader/rag_knowledge.sqlite3" ]; then
-  log_step "Building RAG index (first run, may take a minute)..."
+# Read EXTRACTION_RAG_DB from .env or use default
+RAG_DB=$(grep "^EXTRACTION_RAG_DB=" .env | cut -d= -f2- | tr -d '[:space:]')
+RAG_DB="${RAG_DB:-synthetic_data_loader/rag_knowledge.sqlite3}"
+export EXTRACTION_RAG_DB="$RAG_DB"
+
+if [ ! -f "$RAG_DB" ]; then
+  log_step "Building RAG index at $RAG_DB (first run, may take a minute)..."
   python -m extraction_agent.build_rag_index
   log_ok "RAG index built"
 else
-  log_ok "RAG index already exists"
+  log_ok "RAG index already exists at $RAG_DB"
 fi
 
 deactivate
@@ -352,8 +338,8 @@ echo "1. Start Ollama (if using local LLM):"
 echo "   ollama serve"
 echo ""
 echo "2. Start the applications:"
-echo "   bash scripts/run-mac.sh (on macOS)"
-echo "   .\scripts\run-all.ps1 (on Windows PowerShell)"
+echo "   bash scripts/run-all.sh --bootstrap  (macOS/Linux)"
+echo "   .\\scripts\\run-all.ps1 -Bootstrap    (Windows PowerShell)"
 echo ""
 echo "3. Access the portal:"
 echo "   Contract Portal:    https://localhost:5173"
