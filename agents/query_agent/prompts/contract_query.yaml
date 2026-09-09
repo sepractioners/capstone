@@ -19,13 +19,19 @@ data_sources:
   counts: |
     Results of deterministic count_contracts calls.
     Contains:
-    - total: count of all contracts in tenant
-    - matched: exact count matching the filter
-    - by_lifecycle_status: breakdown of all contracts (EVERY contract counted)
-    - by_contract_type: breakdown of all contracts by type (EVERY contract counted)
+    - total: count of all contracts in the tenant
+    - matched: exact count matching `filter`
+    - filter: the filter that produced `matched` (e.g. {lifecycle_status: active, contract_type: vendor-agreement})
+    - by_lifecycle_status: breakdown of ALL contracts by status - ignores `filter`
+    - by_contract_type: breakdown of ALL contracts by type - ignores `filter`
 
-    These are authoritative. For "how many active?" read straight from by_lifecycle_status.
-    Never count from evidence when counts exist.
+    PRECEDENCE (authoritative, never count from evidence):
+    - `filter` non-empty  -> the answer is `matched`. The by_* breakdowns count
+      every contract and do NOT apply the filter, so reading them here is wrong.
+    - `filter` empty and the question asks for a per-status or per-type breakdown
+      ("how many of each status", "break down by type") -> use by_lifecycle_status
+      / by_contract_type.
+    - `filter` empty and the question asks a single total -> use `total`.
 
   contract_lists: |
     Results of deterministic list_contracts and find_contracts calls.
@@ -64,12 +70,17 @@ answer_structure:
     For multi-part questions, answer each part and note if data doesn't cover it.
 
   citations: |
-    List all sources.
-    Portfolio-level (counts, aggregates, lists): cite with contract_id "portfolio" and label.
-    Clause-level (evidence): cite with real contract_id and evidence label.
+    Each citation is {contract_id, label, evidence}. All three fields are required
+    and `evidence` must be the concrete value or quote you used - never a field
+    name, never "[]".
+    Portfolio-level (counts, aggregates, lists): contract_id "portfolio", label
+    like "count.matched" / "aggregate.sum_value" / "contract_lists.matched",
+    evidence = the number (e.g. "12", "$2,400,000").
+    Clause-level: real contract_id, label like "obligation_42" / "clause_15",
+    evidence = the quoted clause text.
     Example citations:
-    - {"contract_id": "portfolio", "label": "count.matched", "value": "12"}
-    - {"contract_id": "VA-2024-001", "label": "obligation_42", "text": "..."}
+    - {"contract_id": "portfolio", "label": "count.matched", "evidence": "12 (filter: active, vendor-agreement)"}
+    - {"contract_id": "VA-2024-001", "label": "obligation_42", "evidence": "Customer shall pay all undisputed invoices within thirty (30) days"}
 
   confidence: |
     high: data directly answers the question
@@ -80,19 +91,44 @@ answer_structure:
     boolean - true if counts have small sample size, data is partial, or evidence is ambiguous
 
 examples:
+  # RULE illustrated: when counts.filter is set, the answer is counts.matched.
+  # Ignore by_lifecycle_status / by_contract_type - they count every contract.
   example_1:
-    query: "How many active vendor agreements do we have, and what is the total annual spend?"
+    query: "How many active vendor agreements do we have?"
     data_provided:
-      - counts: {total: 145, matched: 38, by_lifecycle_status: {active: 38, review: 12, draft: 4, ...}}
-      - aggregates: {measure: "sum_value", value: Decimal("2400000")}
+      - counts:
+          total: 145
+          matched: 7
+          filter: {lifecycle_status: "active", contract_type: "vendor-agreement"}
+          by_lifecycle_status: {active: 88, review: 12, draft: 4}
+          by_contract_type: {vendor-agreement: 53, nda: 22}
 
     answer: |
-      We have **38 active vendor agreements** (from count.matched).
-      Total annual spend across active agreements is **$2,400,000** (from aggregate.sum_value).
+      We have **7 active vendor agreements** (counts.matched, filter = active +
+      vendor-agreement).
 
     citations: |
-      - {"contract_id": "portfolio", "label": "count.matched", "value": "38"}
-      - {"contract_id": "portfolio", "label": "aggregate.sum_value", "value": "$2,400,000"}
+      - {"contract_id": "portfolio", "label": "count.matched", "evidence": "7 (filter: active, vendor-agreement)"}
+
+    confidence: high
+    uncertain: false
+
+  # RULE illustrated: filter empty + "by status" question -> use by_lifecycle_status.
+  example_1b:
+    query: "How many contracts do we have, by lifecycle status?"
+    data_provided:
+      - counts:
+          total: 40
+          matched: 40
+          filter: {}
+          by_lifecycle_status: {active: 24, approved: 15, in_review: 1}
+
+    answer: |
+      **40 contracts** total: **24 active**, **15 approved**, **1 in review**
+      (counts.by_lifecycle_status).
+
+    citations: |
+      - {"contract_id": "portfolio", "label": "count.by_lifecycle_status", "evidence": "active 24, approved 15, in_review 1"}
 
     confidence: high
     uncertain: false
@@ -117,9 +153,9 @@ examples:
       - **VA-2024-002**: Liability limited to **$500,000** per occurrence
 
     citations: |
-      - {"contract_id": "portfolio", "label": "find_contracts.matched", "value": "18"}
-      - {"contract_id": "VA-2024-001", "label": "clause_89"}
-      - {"contract_id": "VA-2024-002", "label": "clause_156"}
+      - {"contract_id": "portfolio", "label": "find_contracts.matched", "evidence": "18"}
+      - {"contract_id": "VA-2024-001", "label": "clause_89", "evidence": "liability shall not exceed the total annual contract value"}
+      - {"contract_id": "VA-2024-002", "label": "clause_156", "evidence": "liability limited to $500,000 per occurrence"}
 
     confidence: high
     uncertain: false

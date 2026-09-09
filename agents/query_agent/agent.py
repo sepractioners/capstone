@@ -133,10 +133,18 @@ PROMPT_PATH = Path(__file__).parent / "prompts" / "contract_query.yaml"
 
 _PLAN_PROMPT = (
     "You route a contract question to data tools. One question often has several needs at "
-    "once - resolve every one of them. Emit one call per distinct need (1 to 5). Every tool "
-    "shares an optional filter: lifecycle_status, contract_type (use the exact facet values "
-    "given), party (a counterparty name), effective_year, expiring_within_days (e.g. 90 for "
-    "'next quarter' - never compute a date yourself), min_value / max_value.\n"
+    "once - resolve every one of them. Emit one call per distinct need (1 to 5).\n"
+    "FILTERS FIRST: the user message carries `facets` = the lifecycle_status and "
+    "contract_type values that actually exist in this portfolio. Every count / list / "
+    "aggregate / find call shares an optional filter - lifecycle_status, contract_type, "
+    "party (a counterparty name), effective_year, expiring_within_days (90 for 'next "
+    "quarter' - never compute a date), min_value / max_value. If the question names a "
+    "value from `facets.lifecycle_status` or `facets.contract_type`, you MUST copy that "
+    "exact facet string onto every call - use the facet spelling ('vendor-agreement'), "
+    "not the question's words ('vendor agreements'). Examples:\n"
+    "  'How many active vendor agreements?' -> count_contracts(lifecycle_status='active', contract_type='vendor-agreement')\n"
+    "  'List co-branding deals' -> list_contracts(contract_type='co-branding-agreement')\n"
+    "  'Which reseller contracts mention insurance?' -> find_contracts(contract_type='reseller-agreement', query='insurance')\n"
     "- COUNT ('how many active', 'how many NDAs signed in 2024') -> count_contracts.\n"
     "- LIST ('which contracts expire in the next quarter', 'list our active vendor "
     "agreements', 'show every co-branding deal') -> list_contracts. detail='full' only for a "
@@ -159,9 +167,14 @@ _VERIFY_PROMPT = (
     "`aggregates` blocks are deterministic platform facts and are authoritative for numbers, "
     "totals, and enumeration - a claim matching them is supported (a citation with "
     "contract_id 'portfolio' is valid). Other claims must be backed by the cited evidence. "
-    "Set supported=false only if the answer contradicts those blocks or the evidence does "
-    "not back a clause-level claim. List the labels of any citations nothing supports. Give "
-    "a calibrated confidence in [0,1]. Return only the schema."
+    "When a `counts` block has a non-empty `filter`, the count answer MUST equal its "
+    "`matched` value - a number taken from `by_lifecycle_status` / `by_contract_type` while "
+    "a filter is set is unsupported (those breakdowns ignore the filter). Likewise a "
+    "`contract_lists` answer must use its `matched`. "
+    "Set supported=false if the answer contradicts those blocks, uses an unfiltered "
+    "breakdown where `matched` applies, or the evidence does not back a clause-level claim. "
+    "List the labels of any citations nothing supports. Give a calibrated confidence in "
+    "[0,1]. Return only the schema."
 )
 _INTERPRET_PROMPT = (
     "You are reading tenant-scoped contract evidence to build an explicit model before "
@@ -238,13 +251,32 @@ _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 _OVER_RE = re.compile(r"\b(over|above|more than|greater than|at least|exceed(?:ing|s)?|worth (?:over|more than))\b", re.I)
 
 
+_SEP_RE = re.compile(r"[-_]+")
+
+
+def _slug_match(needle: str, haystack: str) -> bool:
+    """True when a facet value appears in the question regardless of how the
+    two spell a multi-word value - ``co-branding-agreement`` / ``co branding
+    agreements`` / ``in_review`` / ``in review`` all resolve. The facet form is
+    the exact value stored on the contract; the question keeps its own hyphens
+    and plurals, so normalise both to spaced, singular tokens before matching."""
+    n = _SEP_RE.sub(" ", needle.lower()).strip()
+    h = _SEP_RE.sub(" ", haystack.lower())
+    if not n:
+        return False
+    if n in h:
+        return True
+    # tolerate a trailing plural on the last word ("agreements" vs "agreement")
+    return bool(re.search(rf"(?:^|\s){re.escape(n)}s?(?:$|\s)", h))
+
+
 def _infer_where(question: str, facets: dict[str, list[str]]) -> dict[str, Any]:
     lowered = question.lower()
     where: dict[str, Any] = {}
-    status = next((s for s in facets.get("lifecycle_status", []) if s and s in lowered), "")
+    status = next((s for s in facets.get("lifecycle_status", []) if s and _slug_match(s, question)), "")
     if status:
         where["lifecycle_status"] = status
-    ctype = next((t for t in facets.get("contract_type", []) if t and t.replace("-", " ") in lowered), "")
+    ctype = next((t for t in facets.get("contract_type", []) if t and _slug_match(t, question)), "")
     if ctype:
         where["contract_type"] = ctype
     year = _YEAR_RE.search(question)
@@ -260,18 +292,62 @@ def _infer_where(question: str, facets: dict[str, list[str]]) -> dict[str, Any]:
     return where
 
 
+_CLAUSE_PHRASE_RE = re.compile(
+    r"\b(?:mention|mentions|require|requires|contain|contains|include|includes|have|has|with|about)\s+"
+    r"(?:an?\s+|any\s+|the\s+|explicit\s+|a\s+)*"
+    r"([a-z][a-z\- ]{2,40}?)"
+    r"(?=\s*(?:\?|$|[,.;]|\bclause|\bprovision|\bobligation|\bterm))",
+    re.I,
+)
+
+
+_PHRASE_STOP_RE = re.compile(
+    r"\b(all|any|our|its|their|contracts?|agreements?|deals?|portfolio|across|every|them|we|us|do)\b",
+    re.I,
+)
+
+
+def _clause_query(question: str, clause_hit: re.Match[str]) -> str:
+    """The phrase to search clause/obligation text for. Prefer the words the
+    question actually names ('liability insurance') over the first bare keyword
+    the clause regex happened to hit ('liabilit'), but fall back when the
+    captured phrase is question filler ('across all contracts')."""
+    match = _CLAUSE_PHRASE_RE.search(question)
+    if match:
+        phrase = re.sub(r"^(?:a|an|any|the|our)\s+", "", match.group(1).strip(), flags=re.I).strip()
+        if len(phrase) >= 3 and not _PHRASE_STOP_RE.search(phrase):
+            return phrase
+    return clause_hit.group(0)
+
+
 def _default_plan(question: str, facets: dict[str, list[str]]) -> _Plan:
     """Deterministic plan when the planner is disabled or returns nothing -
     same keyword routing as the guard, from an empty plan."""
     return _guard_plan(question, _Plan(reasoning="deterministic keyword routing"), facets, seeded=True)
 
 
+_FILTERABLE_TOOLS = {"count_contracts", "list_contracts", "find_contracts", "aggregate_contracts"}
+
+
 def _guard_plan(question: str, plan: _Plan, facets: dict[str, list[str]], *, seeded: bool = False) -> _Plan:
     """Add the deterministic call the planner obviously missed (or, when ``seeded``,
-    build the whole plan from keywords)."""
+    build the whole plan from keywords), and force the deterministic filter parse
+    onto every filterable call the planner left unscoped."""
     calls = list(plan.calls[: config.max_tool_calls])
     tools = {c.tool for c in calls}
     where = _infer_where(question, facets)
+
+    # The planner - a small local model especially - routinely emits a count /
+    # list / aggregate / find call with no filter even when the question names a
+    # status or type. The planner picks the tools; the deterministic parse owns
+    # the scope. Fill any filter key the call is missing (never override one the
+    # planner set on purpose).
+    for call in calls:
+        if call.tool not in _FILTERABLE_TOOLS:
+            continue
+        for key, value in where.items():
+            if getattr(call, key, "") in ("", None):
+                setattr(call, key, value)
 
     def _mk(tool: str, **extra: Any) -> _ToolCall:
         return _ToolCall(tool=tool, **dict(where), **extra)
@@ -281,7 +357,7 @@ def _guard_plan(question: str, plan: _Plan, facets: dict[str, list[str]], *, see
     enumerate_clause = bool(clause_hit) and (is_list or bool(_SCOPE_RE.search(question)))
 
     if enumerate_clause and "find_contracts" not in tools:
-        calls.append(_mk("find_contracts", query=clause_hit.group(0)))
+        calls.append(_mk("find_contracts", query=_clause_query(question, clause_hit)))
         tools.add("find_contracts")
 
     if _MATH_RE.search(question) and "aggregate_contracts" not in tools:
@@ -422,6 +498,103 @@ def _interpretation_view(interpretation: _Interpretation | None) -> dict[str, An
     return interpretation.model_dump(mode="json") if interpretation is not None else None
 
 
+_DRAFT_LIST_ROWS = 15
+_BREAKDOWN_RE = re.compile(r"\bby (?:lifecycle )?(?:status|type|contract type)\b|\bbreak ?down\b|\beach (?:status|type)\b", re.I)
+_STATUS_WORD_RE = re.compile(r"\bstatus\b", re.I)
+_NAME_LIMIT = 12
+
+
+def _row_name(row: dict[str, Any]) -> str:
+    return str(row.get("title") or row.get("contract_number") or row.get("id") or "?")
+
+
+def _compose_deterministic(question: str, gathered: dict[str, Any]) -> QueryAnswer | None:
+    """Template an answer straight from tool output. Returns None when the
+    question needs language-model synthesis (no structured results, or the
+    caller gathered clause snippets). Structural questions - count, filtered
+    count, list, breakdown, enumerate-by-phrase, aggregate - are a pure
+    function of what Retrieve produced; the LLM only reformats a number there,
+    and that is the step that fails on a small model."""
+    if gathered.get("snippets"):
+        return None
+    counts = gathered.get("counts") or []
+    lists = gathered.get("lists") or []
+    aggregates = gathered.get("aggregates") or []
+    if not (counts or lists or aggregates):
+        return None
+
+    parts: list[str] = []
+    cites: list[Citation] = []
+
+    for c in counts:
+        flt = c.get("filter") or {}
+        if flt:
+            parts.append(f"{c['matched']} contract(s) match {_fmt_filter(flt)}.")
+            cites.append(Citation(contract_id="portfolio", label="count.matched",
+                                  evidence=f"{c['matched']} (filter: {_fmt_filter(flt)})"))
+        elif _BREAKDOWN_RE.search(question):
+            book = c.get("by_lifecycle_status") if _STATUS_WORD_RE.search(question) or "lifecycle" in question.lower() else c.get("by_contract_type")
+            book = book or c.get("by_lifecycle_status") or c.get("by_contract_type") or {}
+            body = ", ".join(f"{k} {v}" for k, v in book.items())
+            parts.append(f"{c.get('total', sum(book.values()))} contracts total: {body}.")
+            cites.append(Citation(contract_id="portfolio", label="count.breakdown", evidence=body))
+        else:
+            parts.append(f"{c.get('total', c.get('matched'))} contracts in total.")
+            cites.append(Citation(contract_id="portfolio", label="count.total", evidence=str(c.get("total", c.get("matched")))))
+
+    for lst in lists:
+        rows = lst.get("contracts") or []
+        names = [_row_name(r) for r in rows[:_NAME_LIMIT]]
+        more = "" if len(rows) <= _NAME_LIMIT else f", and {len(rows) - _NAME_LIMIT} more"
+        terms = lst.get("match_terms")
+        if terms:
+            label, kind = "find_contracts.matched", f" mention {' + '.join(terms)}"
+        else:
+            label, kind = "contract_lists.matched", " match the filter" if lst.get("filter") else ""
+        listing = f": {'; '.join(names)}{more}" if names else ""
+        parts.append(f"{lst.get('matched', len(rows))} contract(s){kind}{listing}.")
+        cites.append(Citation(contract_id="portfolio", label=label, evidence=str(lst.get("matched", len(rows)))))
+
+    for agg in aggregates:
+        results = agg.get("results")
+        if results:
+            body = ", ".join(f"{r['group']}: {r['value']}" for r in results)
+            parts.append(f"{agg['measure']} by {agg.get('group_by')}: {body}.")
+            cites.append(Citation(contract_id="portfolio", label=f"aggregate.{agg['measure']}", evidence=body))
+        else:
+            parts.append(f"{agg['measure']}: {agg.get('value')}.")
+            cites.append(Citation(contract_id="portfolio", label=f"aggregate.{agg['measure']}", evidence=str(agg.get("value"))))
+
+    if not parts:
+        return None
+    return QueryAnswer(answer=" ".join(parts), confidence=0.9, uncertain=False, citations=cites)
+
+
+def _fmt_filter(flt: dict[str, Any]) -> str:
+    return ", ".join(f"{k}={v}" for k, v in flt.items())
+
+
+def _trim_lists_for_draft(lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the authoritative `matched` count and a bounded sample of rows. A
+    small model drowns in 20+ full rows and answers nothing; the count is what
+    an enumeration question actually needs, plus enough names to be concrete."""
+    trimmed: list[dict[str, Any]] = []
+    for block in lists:
+        rows = block.get("contracts", []) or []
+        sample = [
+            {k: r.get(k) for k in ("contract_number", "title", "lifecycle_status", "contract_type")}
+            for r in rows[:_DRAFT_LIST_ROWS]
+        ]
+        trimmed.append({
+            "matched": block.get("matched"),
+            "match_terms": block.get("match_terms"),
+            "filter": block.get("filter"),
+            "truncated": block.get("truncated") or len(rows) > _DRAFT_LIST_ROWS,
+            "contracts": sample,
+        })
+    return trimmed
+
+
 async def _draft_answer(
     question: str,
     history_text: str,
@@ -435,7 +608,7 @@ async def _draft_answer(
             "question": question,
             "conversation": history_text,
             "counts": gathered["counts"],
-            "contract_lists": gathered["lists"],
+            "contract_lists": _trim_lists_for_draft(gathered["lists"]),
             "aggregates": gathered["aggregates"],
             "evidence": gathered["snippets"][: config.evidence_budget],
             "interpretation": _interpretation_view(interpretation),
@@ -464,7 +637,7 @@ async def _verify(
             "answer": draft.answer,
             "citations": cited,
             "counts": gathered["counts"],
-            "contract_lists": gathered["lists"],
+            "contract_lists": _trim_lists_for_draft(gathered["lists"]),
             "aggregates": gathered["aggregates"],
             "interpretation": _interpretation_view(interpretation),
         },
@@ -573,7 +746,12 @@ async def answer(
     scratchpad["what_matters"] = [m.point for m in interpretation.what_matters] if interpretation else []
     rec.record("scratchpad", memory=scratchpad)
 
-    draft = await _draft_answer(question, history_text, gathered, interpretation, rec)
+    draft = _compose_deterministic(question, gathered) if config.deterministic_compose else None
+    if draft is not None:
+        rec.record("draft_answer", note="deterministic compose - structural question, no clause evidence",
+                   output=draft.model_dump(mode="json"))
+    else:
+        draft = await _draft_answer(question, history_text, gathered, interpretation, rec)
     verified = await _verify(question, draft, gathered, interpretation, rec) if config.verify else draft
     if not config.verify:
         rec.record("verify", note="skipped - QUERY_VERIFY=0")

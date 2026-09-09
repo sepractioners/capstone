@@ -21,28 +21,29 @@ app = MCPServer(
     instructions="""Read-only CLM analysis boundary. Query and analyze contracts for organization.
 
 TOOL ROUTING GUIDE:
-1. analyze_contracts: Answer a question grounded in contract evidence (reasoning)
-   - User: "Do we have non-compete clauses?"
-   - Use this for questions requiring synthesis across multiple clauses
+1. analyze_contracts: Answer a question grounded in contract evidence (reasoning +
+   synthesis across clauses). "Do we have non-compete clauses?"
+2. find_contracts: Complete enumeration of contracts matching a text phrase and/or
+   filters. "Which vendor contracts expire in 90 days?" Discovery, not reasoning.
+3. search_clauses: Ranked clause snippets by keyword. Evidence retrieval / "show me
+   all liability caps".
+4. count_contracts: Counts, optionally filtered. "How many active NDAs?"
+5. list_contracts / aggregate_contracts: filtered rows / count|sum|avg|min|max of value.
 
-2. find_contracts: List all contracts matching criteria (deterministic filtering)
-   - User: "Which vendor contracts expire in 90 days?"
-   - Use this for discovery, not reasoning
+FILTERS: lifecycle_status and contract_type must be one of the values that exist in
+this portfolio (call count_contracts with no filter to see by_lifecycle_status /
+by_contract_type keys). Pass the stored spelling ("vendor-agreement"), not the
+user's words ("vendor agreements").
 
-3. search_clauses: Find specific clauses by keyword (internal + direct search)
-   - Used by agents to retrieve evidence during reasoning
-   - Also available for direct "Show me all liability caps" queries
-
-4. count_contracts: Count contracts matching filters (fast aggregation)
-   - User: "How many active NDAs do we have?"
-   - Returns count only, not contract details
+RESULT PRECEDENCE: count_contracts returns `matched` (respects the filter) plus
+`by_lifecycle_status` / `by_contract_type` (whole portfolio, ignore the filter).
+When a filter is set, `matched` is the answer - never a number from a by_* block.
 
 KEY HEURISTICS:
 - Portfolio queries (contract_id=None): "Do we have X?" "List all Y contracts"
 - Specific queries (contract_id=<uuid>): "In this contract, what is X?"
 - Escalate to "Not covered" if evidence <50% relevant
 - Separate facts (stated) from implications (inferred)
-- When ambiguous, show all interpretations with confidence scores
 """,
 )
 _dependencies: Dependencies | None = None

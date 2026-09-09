@@ -26,6 +26,10 @@ class QueryAgentConfig:
     plan_tools: bool = os.environ.get("QUERY_PLAN_TOOLS", "1") != "0"
     interpret: bool = os.environ.get("QUERY_INTERPRET", "1") != "0"
     verify: bool = os.environ.get("QUERY_VERIFY", "1") != "0"
+    # Compose structural answers (count / list / breakdown / enumerate / aggregate)
+    # straight from tool output - no LLM draft call - when no clause evidence was
+    # gathered. The LLM draft still runs for clause-synthesis questions.
+    deterministic_compose: bool = os.environ.get("QUERY_DETERMINISTIC_COMPOSE", "1") != "0"
     # Best-effort steps (plan, interpret) fall back to deterministic behaviour
     # rather than block for the full provider timeout on a slow local model.
     fast_timeout_seconds: float = max(20.0, float(os.environ.get("QUERY_FAST_TIMEOUT_SECONDS", "120")))
