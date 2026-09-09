@@ -312,27 +312,33 @@ See [SETUP.md](SETUP.md) for troubleshooting.
 
 ```mermaid
 graph TB
-    UI["🖥️ Portal, Admin Console, CLI"]
-    API["🌐 FastAPI + Auth + Tenant Scoping"]
-    Agents["🤖 Extraction & Query Agents"]
-    MCP["🔒 MCP Boundary<br/>(Isolation Barrier)"]
-    Domain["🏗️ Domain Model<br/>(Contracts, Obligations)"]
-    RAG["🗄️ RAG Index<br/>(CUAD Embeddings)"]
-    DB["🏛️ SQLite Databases<br/>(clm.sqlite3, rag_knowledge.sqlite3)"]
-    
-    UI → API
-    API → Agents
-    Agents →|only via MCP| Domain
-    Agents →|retrieval| RAG
-    Domain → DB
-    RAG → DB
-    
-    style Agents fill:#fff3e0,stroke:#ff9800,stroke-width:3px
-    style MCP fill:#ffcdd2,stroke:#d32f2f,stroke-width:3px
-    style Domain fill:#f1f8e9,stroke:#388e3c,stroke-width:3px
+    UI["🖥️ Portal · Admin Console · CLI"]
+    API["🌐 FastAPI — auth + tenant scoping + SSE"]
+    EMCP["🔒 Extraction MCP (write)"]
+    QMCP["🔒 Query MCP (read-only)"]
+    EA["🤖 Extraction Agent"]
+    QA["🤖 Query Agent"]
+    Domain["🏗️ App — domain + services"]
+    CLM[("🏛️ clm.sqlite3<br/>contracts, clauses, obligations, tenants")]
+    KB[("🗄️ rag_knowledge.sqlite3<br/>profiles + CUAD embeddings")]
+
+    UI --> API
+    API --> EMCP
+    API --> QMCP
+    EMCP -->|imports & wraps| EA
+    QMCP -->|imports & wraps| QA
+    EA --> EMCP
+    EA -->|retrieval| KB
+    QA -->|reads| CLM
+    EMCP --> Domain --> CLM
+
+    style EA fill:#fff3e0,stroke:#ff9800
+    style QA fill:#fff3e0,stroke:#ff9800
+    style EMCP fill:#ffcdd2,stroke:#d32f2f
+    style QMCP fill:#ffcdd2,stroke:#d32f2f
 ```
 
-**Key principle**: Agents communicate with domain only through MCP servers (strict isolation). This enables independent evolution and prevents architectural coupling.
+**Key principles**: agents reach the domain only through MCP servers (which enforce tenant scope + schema); the MCP servers *import and wrap* the agents (one process, one boundary crossed per request); the query agent reads `clm.sqlite3` only — `rag_knowledge.sqlite3` is extraction-only. See [docs/isolation-strategy.md](docs/isolation-strategy.md).
 
 **Architecture documentation:** [docs/](docs/) — isolation strategy, design principles, agentic architecture, data lifecycle, memory & reasoning.
 

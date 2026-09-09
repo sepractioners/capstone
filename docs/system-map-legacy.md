@@ -1,6 +1,11 @@
 # Legacy System Map
 
-This document preserves the original system architecture diagram for historical reference and evolution tracking.
+**Historical — captured ~2026-08. Superseded by
+[Agentic Solution Architecture](agentic-architecture.md) and
+[README Component Architecture](../README.md#-component-architecture).** Kept only
+to show how the two views were once combined. Some labels below (e.g. the query
+agent as "decompose → ReAct") are from that earlier design and no longer match
+the code — the current flow is `plan → gather → interpret → draft → verify`.
 
 ## Original Combined System Map
 

@@ -16,6 +16,15 @@ SQLite Database
 
 The MCP boundary is a one-way valve: agents can invoke MCP tools, but the app stack has no knowledge agents exist and cannot call back into the agentic system.
 
+**Process shape (not obvious from the diagram):** the MCP *servers* import the
+agents, not the reverse. `query_mcp_server.server` imports `query_agent.answer`;
+`extraction_mcp_server` / `clm_mcp_server` import the extraction handlers. The
+orchestrator connects to a server over stdio (`query_agent/mcp_client.py`), the
+server invokes the agent in-process, and the agent's own tool calls
+(`portfolio.py`, the ingest handler) are direct Python — the agent never opens
+an MCP client to reach its own tools. A network-deployed split would change this;
+today it is one process boundary crossed once per request.
+
 ## Isolation Rules
 
 ### 1. No Circular Dependencies
@@ -57,38 +66,34 @@ The MCP boundary is a one-way valve: agents can invoke MCP tools, but the app st
 ### Extraction Flow
 
 ```
-Web Portal / CLI
-    ↓ (HTTP to Agent Orchestrator)
-Agent Orchestrator
-    ↓ (LangGraph state machine)
-Extraction Agent
-    ↓ (tool calls via MCP)
-Extraction MCP Server
-    ↓ (validates tenant, enforces schema)
-Application Services
-    ↓ (domain logic, cascades)
-SQLite Database (Domain Store)
+Portal / CLI ──HTTP──> Orchestrator ──stdio MCP──> Extraction MCP server
+                                                      │ (tenant + schema)
+                                                      ▼
+                                         Extraction Agent (in-process)
+                                         load → extract → review → ingest
+                                                      │ ingest_contract (direct)
+                                                      ▼
+                                         Application services → clm.sqlite3
 ```
 
 ### Query Flow
 
 ```
-Web Portal / CLI
-    ↓ (HTTP to Agent Orchestrator)
-Agent Orchestrator
-    ↓ (LangGraph state machine)
-Query Agent
-    ↓ (tool calls via MCP)
-Query MCP Server
-    ↓ (enforces tenant read scope, validates authorization)
-Application Services (read-only queries)
-    ↓
-SQLite Database (reads only authorized tenant data)
-    ↓
-Query Agent (interprets results)
-    ↓
-Portal
+Portal / CLI ──HTTP──> Orchestrator ──stdio MCP──> Query MCP server (read-only)
+                                                      │ contract_tenants check
+                                                      ▼
+                                         Query Agent (in-process): answer()
+                                         plan → gather → interpret → draft → verify
+                                                      │ portfolio.py (direct SQL)
+                                                      ▼
+                                         reads only authorized tenant contracts
+                                                      │
+                                         answer + citations ──SSE──> Portal
 ```
+
+The agent's own tool calls (`portfolio.py`, `ingest_contract`) are direct Python
+in the MCP-server process — no second MCP hop. The tenant check happens once, at
+the server entry.
 
 ## Why This Matters
 

@@ -6,43 +6,35 @@ How the platform orchestrates three autonomous agents that reason and act within
 
 ```mermaid
 flowchart LR
-    Sources["PDF / JSON / CSV"] --> UI["React chat / CLI"]
-    UI --> Orchestrator["web\nAgent Orchestrator<br/>(Planner)"]
-    UI --> AgentAdmin["web\nAgent Console<br/>(admin observability)"]
-    ChromeAgent["Chrome MCP<br/>validation agent"] --> Chrome["Chrome browser"]
-    Chrome --> UI
-    
-    Orchestrator --> |intent check<br/>plan steps| Planner["Plan-and-Execute<br/>extract/analyze steps"]
-    
-    Planner --> |step 1| ExtractionAgent["Extraction Agent<br/>load → extract → review → ingest"]
-    Planner --> |step 2| QueryAgent["Query Agent<br/>decompose → ReAct → interpret → verify"]
-    
-    ProceduralKnowledge["Procedural knowledge<br/>contract profiles"] --> HybridRAG["Hybrid Retrieval<br/>SQLite FTS5 + embeddings"]
-    CUAD["CUAD examples<br/>local, non-authoritative"] --> HybridRAG
-    HybridRAG --> ExtractionAgent
-    ExtractionAgent --> ExtractionMemory["Per-document<br/>working memory"]
-    ExtractionMemory --> ExtractionAgent
-    
-    QueryMemory["Query ReAct<br/>scratchpad"] --> QueryAgent
-    ConversationMemory["Episodic memory<br/>SQLite log + rolling summary"] --> Orchestrator
-    Orchestrator --> ConversationMemory
-    ConversationMemory --> QueryAgent
-    ConversationMemory --> AgentAdmin
-    ExtractionMemory --> AgentAdmin
-    HybridRAG --> AgentAdmin
-    
-    ExtractionAgent --> ExtractionMCP["Extraction MCP<br/>(write)"]
-    QueryAgent --> QueryMCP["Query MCP<br/>(read)"]
-    ExtractionMCP --> App["app<br/>Domain + services"]
-    QueryMCP --> App
-    App --> SQLite[("SQLite")]
-    SQLite --> ContractEvidence["Authoritative evidence<br/>contracts, clauses, obligations"]
-    ContractEvidence --> QueryMCP
-    Testing["platform_testing<br/>YAML scenarios + eval"] --> Web["web<br/>API + portal"]
-    Testing --> ExtractionAgent
-    Testing --> QueryAgent
-    ChromeAgent --> Testing
+    Sources["PDF / JSON / CSV"] --> UI["React portal / CLI"]
+    UI --> Orch["web/clm_web<br/>orchestrator (plan-and-execute)<br/>+ SSE + episodic memory"]
+    UI -.observe.-> Console["web/admin<br/>Agent Console (traces)"]
+
+    Orch --> |extract step| EA["Extraction Agent<br/>load → extract → review → ingest"]
+    Orch --> |analyze step| QMCP
+
+    EA --> RAG["Hybrid RAG<br/>FTS5 + embeddings<br/>(rag_knowledge.jsonl + CUAD)"]
+    RAG --> EA
+    EA --> EMCP["Extraction MCP (write)"]
+
+    QMCP["Query MCP (read-only)<br/>imports & wraps ↓"] --> QA["Query Agent<br/>plan → gather → interpret → draft → verify"]
+    QA --> Portfolio["portfolio.py<br/>count / list / find / aggregate (deterministic)"]
+
+    EMCP --> App["app<br/>domain + services"]
+    QMCP --> App
+    App --> DomainDB[("clm.sqlite3<br/>contracts, clauses, obligations, tenants")]
+    RAG --> KB[("rag_knowledge.sqlite3<br/>extraction only")]
+    DomainDB --> Portfolio
 ```
+
+Two databases, two readers: `clm.sqlite3` is the authoritative domain store —
+the query agent reads it, the extraction MCP writes it. `rag_knowledge.sqlite3`
+holds contract-type profiles + CUAD clause embeddings and is read **only** by the
+extraction agent.
+
+**Dependency direction:** `query_mcp_server` and `clm_mcp_server` *import*
+`query_agent.answer` / the extraction handlers — the MCP server wraps the agent,
+not the other way round. Agents never import `app/` internals.
 
 ## Three Agent Types
 
@@ -108,33 +100,28 @@ flowchart LR
 
 ---
 
-### Query Agent (Plan → Gather → Interpret → Verify)
+### Query Agent (plan → gather → interpret → draft → verify)
 
-**Role**: Answer questions about authorized contract evidence.
+**Role**: Answer organization-wide questions about tenant-scoped stored contracts.
 
-**Process**:
-1. **Decompose**: Break user question into sub-queries
-2. **Gather**: 
-   - Call deterministic portfolio tools: `count_contracts`, `list_contracts`, `search_clauses`
-   - Retrieve clause text and metadata from MCP read API
-   - Never sample; always enumerate complete results
-3. **Interpret**: 
-   - Use LLM only to map retrieved evidence to user intent
-   - Never hallucinate counts or lists
-   - Trigger → consequence chains from review passes
-4. **Verify**: 
-   - Double-check facts against database
-   - Supply full source references (contract ID, clause type, text location)
+| Stage | What it does | LLM? |
+|---|---|---|
+| **plan** | Classify the question, emit one tool call per need with a `where` filter. `QUERY_PLAN_TOOLS=0` (default for small models) uses deterministic keyword + facet routing instead. | opt-in |
+| **gather** | Run the calls. `count_contracts` / `list_contracts` / `find_contracts` / `aggregate_contracts` are exact deterministic scans over `portfolio.py`; `search_clauses` is embedding-ranked, for clause detail only. Complete enumeration, never sampling. | no |
+| **interpret** | Only when clause snippets were gathered — build trigger → consequence → `what_matters`. `QUERY_INTERPRET`. | yes (best-effort) |
+| **draft** | Compose the answer + citations. For structural questions (count / list / breakdown / enumerate / aggregate — no clause snippets) `_compose_deterministic` templates it with **zero LLM calls** (`QUERY_DETERMINISTIC_COMPOSE`, default on). The LLM draft runs only for clause synthesis. | conditional |
+| **verify** | `counts` / `contract_lists` are authoritative for numbers; clause claims need cited evidence. Drops unsupported citations, calibrates confidence. `QUERY_VERIFY`. | yes |
 
-**Guardrails**:
-- Deterministic baseline tools prevent hallucination
-- LLM reasoning only on interpretation (safe zone)
-- Complete enumeration (never sampling)
-- Per-call schema validation
+The contract data is authoritative — the model cannot retrieve outside what the
+Query MCP returns, and a provider failure ends the run rather than guessing.
+Money and date arithmetic is always done in `contract_calc`, never by the model.
 
-**Memory**:
-- **Query Scratchpad**: ReAct reasoning for one request (discarded after response)
-- **Episodic Memory**: User/assistant messages from conversation history (SQLite log + rolling summary passed to next query)
+**Memory**: stateless. A per-request scratchpad (planned calls, evidence labels,
+`what_matters`), discarded after the response; the orchestrator passes a
+read-only `history` (role + text).
+
+See [Memory and Reasoning](memory-and-reasoning.md) for the full per-stage
+detail and every knob.
 
 ---
 
@@ -142,10 +129,12 @@ flowchart LR
 
 | Type | Scope | Persistence | Purpose |
 |------|-------|-------------|---------|
-| **Working Memory** (Extraction) | Per document | None (discarded after run) | Thread state across pages: title, parties, terms, obligations. Never cross-document or cross-tenant. |
-| **ReAct Scratchpad** (Query) | Per request | None (discarded after response) | Step-by-step reasoning for decompose → gather → interpret → verify. |
-| **Episodic Memory** | Per conversation | SQLite log + rolling summary | User messages, assistant responses, run status, SSE events. Bounded window for follow-ups. |
-| **Semantic Knowledge** | Global | SQLite + embeddings (authoritative contracts + CUAD) | Contract evidence + CUAD examples + procedural knowledge. Read-only for agents. |
+| **Working Memory** (Extraction) | Per document | None (discarded after run) | Thread state across pages: title, type, parties, defined terms, renewal/termination terms. Never cross-document or cross-tenant. |
+| **Scratchpad** (Query) | Per request | None (discarded after response) | Planned tool calls, evidence labels, `what_matters` for one `plan → gather → interpret → draft → verify` run. |
+| **Episodic Memory** | Per conversation | SQLite log + bounded window + rolling summary | User/assistant messages, run status, SSE events. Owned by the orchestrator; the query agent gets it as read-only `history`. |
+| **Semantic Knowledge** (Extraction only) | Global | `rag_knowledge.sqlite3` (FTS5 + embeddings) | Contract-type profiles + CUAD clause examples. Read-only. The query agent does **not** use this — it ranks the tenant's own clauses in-request. |
+
+See [Memory and Reasoning](memory-and-reasoning.md) for the authoritative table.
 
 ---
 
@@ -175,45 +164,18 @@ flowchart LR
 
 ## Orchestration Patterns
 
-### Extraction Workflow
+**Extract:** portal upload → orchestrator `extract` step → Extraction Agent
+(`load → extract → review → ingest`) → Extraction MCP (tenant + schema) → domain
+services → `clm.sqlite3`. Review `blocker` findings return
+`requires_human_confirmation` and stop the write.
 
-```
-Portal (File Upload + Tenant ID)
-    ↓
-Web Ingestion Endpoint
-    ↓
-Orchestrator (Route to Extraction Agent)
-    ↓
-Extraction Agent (Load → Extract → Review → Ingest)
-    ↓
-MCP Extraction Server (Validate tenant, enforce schema)
-    ↓
-Domain Services (Cascade to contracts, clauses, obligations)
-    ↓
-SQLite (Domain Store)
-    ↓
-Portal (Show ingested contract + any review blockers)
-```
+**Analyze:** portal question → orchestrator `analyze` step → Query MCP (tenant
+check, then `answer()`) → `plan → gather → interpret → draft → verify` →
+streamed answer + citations, or a terminal failure (never a guess).
 
-### Query Workflow
-
-```
-Portal (User Question + Tenant ID)
-    ↓
-Orchestrator (Route to Query Agent)
-    ↓
-Query Agent (Decompose → Gather → Interpret → Verify)
-    ↓
-MCP Query Server (Read-only, enforce tenant scope)
-    ↓
-Domain Services (Tenant-scoped reads)
-    ↓
-SQLite (Read authorized contracts)
-    ↓
-Query Agent (Synthesize response with evidence)
-    ↓
-Portal (Show results + source references)
-```
+**Second ingest path (no LLM):** `synthetic_data_loader/seed_contracts.py` builds
+`ContractCandidate`s deterministically and calls the `ingest_contract` handler
+directly — the default validation portfolio. See [Data Lifecycle](data-lifecycle.md).
 
 ---
 

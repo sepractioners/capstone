@@ -4,104 +4,71 @@ How contract data flows through the system from source to storage and retrieval.
 
 ## Overview
 
-The platform accepts contract data from **two sources**:
+Contract data enters through **three paths**:
 
-1. **Tenant Uploads** - Organizations upload their contracts (PDF, JSON, CSV)
-2. **CUAD Dataset** - Kaggle's Atticus Open Contract Dataset for seed knowledge
+1. **Tenant uploads** — organizations upload contracts (PDF / JSON / CSV) → the
+   extraction agent (`load → extract → review → ingest`).
+2. **Synthetic validation portfolio** — `synthetic_data_loader/seed_contracts.py`
+   builds `ContractCandidate`s from a fixed seed (no LLM, no network) and calls
+   the `ingest_contract` handler **directly**, bypassing extraction. This is what
+   `setup` seeds by default (40 contracts, `--seed capstone-review-2026`).
+3. **CUAD dataset** (opt-in) — real SEC-filed contracts used to *ground the
+   extraction agent's RAG* and to run the extraction accuracy eval. Downloaded on
+   demand (`--with-cuad` / `download_cuad_subset`), not part of default setup.
 
-All data is processed through specialized loaders, extracted by agents, and stored in separate, isolated databases.
+Contract records land in `clm.sqlite3` (authoritative domain store). CUAD-derived
+knowledge lands in `rag_knowledge.sqlite3` and is read only by the extraction
+agent — the query agent never touches it.
 
 ## Data Flow Diagram
 
 ```mermaid
 graph LR
-    subgraph Sources["📥 Data Sources"]
-        TenantPDF["Tenant uploads<br/>(PDF)"]
-        TenantJSON["Tenant uploads<br/>(JSON)"]
-        TenantCSV["Tenant uploads<br/>(CSV)"]
-        CUAD["CUAD Dataset<br/>(Kaggle)"]
-    end
-    
-    subgraph Loaders["📦 Data Loaders"]
-        SyntheticLoader["synthetic_data_loader<br/>(CUAD downloader)"]
-        Ingestion["Ingestion Pipeline<br/>(PDF/JSON/CSV parser)"]
-    end
-    
-    subgraph Processing["⚙️ Processing"]
-        Extract["Extraction Agent<br/>(load → extract → review → ingest)"]
-        RAG["Hybrid RAG<br/>(FTS5 + embeddings)"]
-    end
-    
-    subgraph Storage["💾 Storage"]
-        AgentDB["Agent Databases<br/>(RAG index, knowledge)"]
-        DomainDB["Domain Store<br/>(contracts, clauses, obligations)"]
-        FileStore["File Storage<br/>(source PDFs/JSON/CSV)"]
-    end
-    
-    TenantPDF --> Ingestion
-    TenantJSON --> Ingestion
-    TenantCSV --> Ingestion
-    CUAD --> SyntheticLoader
-    
-    Ingestion -->|extract structured data| Extract
-    SyntheticLoader -->|seed knowledge| RAG
-    
-    Extract -->|write contracts via MCP| DomainDB
-    RAG -->|retrieval guidance| Extract
-    
-    Ingestion -->|archive source| FileStore
-    SyntheticLoader -->|archive source| FileStore
-    Extract -->|reference source| FileStore
-    
-    RAG -->|build index| AgentDB
-    
-    style Sources fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
-    style Loaders fill:#fbe9e7,stroke:#d84315,stroke-width:2px
-    style Processing fill:#fff3e0,stroke:#ff9800,stroke-width:2px
-    style Storage fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    style AgentDB fill:#fff9e6,stroke:#f57f17,stroke-width:2px
-    style DomainDB fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    style FileStore fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    Upload["Tenant upload<br/>PDF / JSON / CSV"] --> Extract["Extraction Agent<br/>load → extract → review → ingest"]
+    Seed["seed_contracts.py<br/>synthetic, no LLM"] --> Ingest["ingest_contract handler"]
+    Extract --> Ingest
+    Ingest --> Domain[("clm.sqlite3<br/>contracts, clauses, obligations, tenants")]
+    Ingest --> Blob["document blobs<br/>(source archive)"]
+
+    CUAD["CUAD subset<br/>(opt-in download)"] --> BuildRAG["build_rag_index"]
+    Bundled["rag_knowledge.jsonl<br/>(bundled profiles)"] --> BuildRAG
+    BuildRAG --> KB[("rag_knowledge.sqlite3<br/>FTS5 + embeddings")]
+    KB -->|retrieval guidance| Extract
+
+    Domain --> QueryMCP["Query MCP → Query Agent<br/>(reads Domain only)"]
+
+    style Domain fill:#e8f5e9,stroke:#2e7d32
+    style KB fill:#fff9e6,stroke:#f57f17
 ```
 
 ## Data Sources
 
-### Tenant Uploads
+### Tenant uploads
 
-Organizations upload contracts in three formats:
+PDF / JSON / CSV, tenant-scoped by organization ID. Each runs through the
+extraction agent and is archived as a document blob.
 
-- **PDF** - Scanned or digital contracts (most common)
-- **JSON** - Structured contract data with metadata
-- **CSV** - Tabular contract information for bulk ingestion
+### Synthetic validation portfolio
 
-All uploads are tenant-scoped via organization ID to maintain isolation.
+`synthetic_data_loader/seed_contracts.py` — deterministic per `--seed`, no LLM,
+no network. Builds `ContractCandidate` objects and calls `ingest_contract`
+directly (skips extraction). `setup` seeds 40 by default. Its purpose is to give
+the query agent data to answer against; it does not exercise extraction. Known
+gap: it does not persist `contract_value` / `effective_date` / `execution_date`.
 
-### CUAD Dataset
+### CUAD dataset (opt-in)
 
-The Kaggle **Atticus Open Contract Dataset** provides:
-- Non-authoritative examples for contract type guidance
-- Procedural knowledge (contract profiles, field recommendations)
-- Used to train and seed the RAG knowledge base
+The Atticus **Contract Understanding Atticus Dataset** (CC BY 4.0, SEC-filed
+public-company contracts). Two uses, both opt-in:
+- **Grounds extraction** — `download_cuad_subset` → `build_rag_index` embeds the
+  bundled `rag_knowledge.jsonl` profiles plus any CUAD PDFs into
+  `rag_knowledge.sqlite3`.
+- **Extraction accuracy eval** — `platform_testing/extraction_eval.py` scores the
+  pipeline against `fixtures/cuad_ground_truth.jsonl`.
 
-Downloaded on-demand via `synthetic_data_loader` during seeding.
-
-## Data Loaders
-
-### Ingestion Pipeline
-
-Processes tenant uploads:
-1. **Parse** PDF/JSON/CSV → extract text and structure
-2. **Normalize** → contract metadata (title, parties, dates, type)
-3. **Pass to Extraction Agent** → per-page extraction with working memory
-4. **Archive source** → Blob Store for audit trail
-
-### synthetic_data_loader
-
-Handles CUAD dataset:
-1. **Download** CUAD from Kaggle via `kagglehub`
-2. **Extract** CUAD contracts (PDF → text)
-3. **Index** in knowledge store (FTS5 + embeddings)
-4. **Archive** PDFs in Blob Store
+The dataset strategy (offline-first defaults, one contract-type catalog, a
+real-contract stress corpus, CC-BY licensing) is written up in the ADRs under
+`docs/adr/` (proposed).
 
 ## Processing
 
@@ -175,7 +142,7 @@ Cross-tenant data is impossible by design.
 1. PDF lands in **Ingestion Pipeline**
 2. Text extracted, normalized → contract metadata
 3. **Extraction Agent** reads PDF + consults **RAG**:
-   - Retrieves CUAD "Service Agreement" examples
+   - Retrieves the closest contract-type profile + CUAD clause examples
    - Gets procedural guidance (parties, payment terms, renewals)
 4. Agent extracts: title, parties, dates, key clauses
 5. **Review** pass checks for consistency

@@ -106,6 +106,11 @@ lookup. The agent classifies the *kinds* of question and resolves each.
   gathered - build the trigger → consequence → `what_matters` chain. Best-effort;
   disable with `QUERY_INTERPRET=0`.
 - **Draft:** synthesise one answer across counts, lists, and clause evidence.
+  When no clause snippets were gathered (a structural question - count / filtered
+  count / list / breakdown / enumerate / aggregate) `_compose_deterministic`
+  templates the answer + citations straight from the tool output with **no LLM
+  call**; the LLM draft runs only for clause synthesis. Disable with
+  `QUERY_DETERMINISTIC_COMPOSE=0`.
 - **Verify:** `counts` / `contract_lists` are authoritative for numbers; clause
   claims must be backed by cited evidence. Drops unsupported citations, sets a
   calibrated confidence / the `uncertain` flag.
@@ -142,6 +147,7 @@ deterministic scans; retrieval only ranks clause text for detail questions.
 | `QUERY_EVIDENCE_BUDGET` | `30` | clause snippets sent to the answer step |
 | `QUERY_SEARCH_K` | `8` | records pulled per search |
 | `QUERY_INTERPRET` | `1` | trigger → consequence → what-matters step |
+| `QUERY_DETERMINISTIC_COMPOSE` | `1` | template structural answers (no clause evidence) from tool output — no LLM draft call |
 | `QUERY_VERIFY` | `1` | post-draft verification pass |
 | `QUERY_FAST_TIMEOUT_SECONDS` | `120` | timeout for the best-effort plan / interpret calls |
 | `PLANNER_MAX_STEPS` | `3` | orchestrator plan length cap |

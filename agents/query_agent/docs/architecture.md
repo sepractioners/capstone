@@ -14,7 +14,7 @@ flowchart LR
     Scope --> Plan["_plan() - tree of thought\nclassify question -> tool calls (+ where filter)"]
     Plan --> Gather["_gather()\ncount / list / find / aggregate_contracts (portfolio.py, exact; dates + money math)\nsearch_clauses (flatten + embedding rank)"]
     Gather --> Interpret["_interpret() - clause branch only\ntrigger -> consequence -> what matters"]
-    Interpret --> Draft["_draft_answer()\nsynthesise counts + lists + evidence"]
+    Interpret --> Draft["compose\nstructural: _compose_deterministic() (no LLM)\nclause synthesis: _draft_answer() (LLM)"]
     Draft --> Verify["_verify()\ncounts authoritative; clause claims vs cited evidence"]
     Verify --> Result["Answer + citations +\nconfidence + uncertainty"]
     Result --> Stream
@@ -26,7 +26,7 @@ flowchart LR
 2. The API validates the bearer token and derives the organization context; the client never supplies trusted tenant identity.
 3. The orchestrator assembles the conversation `history` (rolling summary + recent turns, text only), records the run, and emits a safe `retrieving_evidence` event.
 4. The query MCP verifies the organization owns every selected contract and maps authorized snapshots. `count_contracts`, `list_contracts`, and `search_clauses` return deterministically with no LLM; `analyze_contracts` calls `answer()`.
-5. `answer()` **plans** (one LLM call classifies the question - count / list / enumerate-by-clause / math / clause-detail / mixed - and emits one tool call per need, each with an optional `where` filter; keyword guards add the tool and the relative-date / value filters the planner missed), **gathers** by running every call (`portfolio.py` for exact counts / lists / clause enumeration / value math, embedding-ranked `search_clauses` for snippets), **interprets** the clause snippets when present, **drafts** an answer synthesising across counts / lists / aggregates / evidence, and **verifies** it (the deterministic blocks are authoritative, clause claims checked against citations).
+5. `answer()` **plans** (one LLM call classifies the question and emits one tool call per need with an optional `where` filter; `QUERY_PLAN_TOOLS=0` uses deterministic keyword + facet routing instead, and keyword guards always add the tool / relative-date / value filters the planner missed and force the inferred filter onto unscoped calls), **gathers** by running every call (`portfolio.py` for exact counts / lists / clause enumeration / value math, embedding-ranked `search_clauses` for snippets), **interprets** clause snippets when present, **composes** the answer (deterministic template from tool output for structural questions; an LLM draft only when clause snippets were gathered), and **verifies** it (deterministic blocks authoritative; `matched` is the answer when a filter is set; clause claims checked against citations).
 6. The orchestrator persists and streams the answer or terminal failure. It never streams hidden reasoning, tokens, raw source files, or provider secrets.
 
 ## Knowledge and Memory
