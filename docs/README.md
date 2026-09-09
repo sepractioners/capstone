@@ -12,6 +12,13 @@ Cross-module documentation belongs here. Module-specific documentation remains b
 - [Memory and Reasoning](memory-and-reasoning.md) - Working, episodic, and semantic memory models
 - [System Map Legacy](system-map-legacy.md) - Original combined architecture diagram (historical reference)
 
+## Decisions
+
+- [Architecture Decision Records](adr/README.md) - Significant architectural decisions, their context and consequences
+  - [ADR-0001](adr/0001-offline-first-contract-data-and-type-catalog.md) (Proposed) - Offline-first contract data and a single contract-type catalog
+  - [ADR-0002](adr/0002-query-agent-evaluation-substrate.md) (Proposed) - Bounded evaluation substrate for the query agent
+  - [ADR-0003](adr/0003-query-agent-stress-corpus.md) (Proposed) - Pre-built stress corpus for query-agent validation
+
 ## Domain and Implementation
 
 - [Contract Lifecycle DDD](../app/contract-lifecycle-ddd.md) - Domain model and invariants
