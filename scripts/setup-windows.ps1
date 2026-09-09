@@ -200,7 +200,10 @@ python -m clm_web.db --init
 if ($LASTEXITCODE -ne 0) { deactivate; Write-Error2 "Database initialization failed"; exit 1 }
 
 Write-Step "Seeding database with default tenant and admin user..."
-uv run python seed_database.py --skip-cuad --skip-faiss
+# --skip-rag: the RAG knowledge base needs an embedding endpoint (Ollama). Keep
+# it out of this step so tenant + admin + the validation portfolio always land
+# even when Ollama is not running; the RAG index is built best-effort below.
+uv run python seed_database.py --skip-cuad --skip-faiss --skip-rag
 if ($LASTEXITCODE -ne 0) { deactivate; Write-Error2 "Database seeding failed"; exit 1 }
 
 # === 8b. Seed the synthetic validation portfolio ===
@@ -296,10 +299,17 @@ if (-not (Test-Path $RagDbFile)) {
     Write-Step "Building RAG index at $RagDbFile (first run, may take a minute)..."
     .\.venv\Scripts\Activate.ps1
     $env:EXTRACTION_RAG_DB = $RagPath
+    # Best-effort: the RAG index is for the extraction agent only - the query
+    # agent (and the reviewer tour) never read it. Needs Ollama nomic-embed-text.
     python -m extraction_agent.build_rag_index
-    if ($LASTEXITCODE -ne 0) { deactivate; Write-Error2 "RAG index build failed"; exit 1 }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "RAG index build failed (Ollama not running?) - extraction agent will"
+        Write-Warn "fall back to deterministic profiles. Build later with:"
+        Write-Warn "  uv run python -m extraction_agent.build_rag_index"
+    } else {
+        Write-Ok "RAG index built"
+    }
     deactivate
-    Write-Ok "RAG index built"
 } else {
     Write-Ok "RAG index already exists at $RagDbFile"
 }

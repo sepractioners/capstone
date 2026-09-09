@@ -59,6 +59,23 @@ Local model ranking on this hardware:
 | gemma:latest (5 GB) | draft > 300 s | ValidationError | — | 0/2 |
 | gemma4:latest (9.6 GB) | every call > 120 s | — | 0/4 | 0/2 |
 
+## Setup fragility (blocked reviewers on a fresh clone)
+
+`clm.sqlite3`, `synthetic_data_loader/rag_knowledge.sqlite3`, `.env`, `.certs`
+are all gitignored — a fresh clone has none of them; setup must build all.
+
+On master, setup hard-aborts when Ollama is not running: `seed_database.py`
+seeds tenant/admin, then `seed_rag_database` calls `embed()` on every record →
+connection refused → non-zero exit → `exit 1` before the portfolio is seeded.
+`build_rag_index` (a later step) aborts the same way.
+
+Fix (this branch): setup runs `seed_database.py --skip-cuad --skip-faiss
+--skip-rag` (no embedding calls in the tenant step) and treats
+`build_rag_index` as best-effort (warn + continue). Tenant + admin + the 40-
+contract validation portfolio now land offline with no Ollama. The RAG index is
+extraction-only and the query agent never reads it, so it does not gate the
+reviewer tour.
+
 ## Design change proposed
 
 Compose is a pure function of Retrieve's output for every class except clause

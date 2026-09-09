@@ -38,11 +38,17 @@ Access via web portal, CLI, or REST API. Local-first by default (Ollama); switch
 ## 🚀 Quick Start
 
 ### 1. Setup (One Step)
-The setup script handles everything: Python env, dependencies, HTTPS certs, database, `.env` config, and a **synthetic validation portfolio (40 contracts)** so the query agent has data to answer against immediately. It also downloads CUAD sample contracts and builds the RAG index for the extraction agent.
 
 **macOS:** `bash scripts/setup-mac.sh`  
 **Linux:** `bash scripts/setup-linux.sh`  
 **Windows:** `.\scripts\setup-windows.ps1`
+
+Always produced, offline, no Ollama needed:
+- Python env + dependencies, HTTPS certs, `.env`
+- SQLite database with the **tenant** (`Capstone` org + `admin@capstone.local`) and a **synthetic validation portfolio of 40 contracts** — so the query agent has data to answer against the moment setup finishes
+
+Best-effort (needs Ollama / network, and setup continues without them):
+- CUAD sample contracts (download) and the **RAG index** — used only by the *extraction* agent; the query agent never reads it
 
 Options: `--no-sample-data` skips the CUAD download; `--no-validation-data` skips the synthetic portfolio; `--no-ollama` for cloud LLMs. See `--help`.
 

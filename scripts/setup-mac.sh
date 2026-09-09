@@ -199,7 +199,10 @@ export CLM_DATABASE_PATH="$DB_PATH"
 log_step "Creating database schema at $DB_FILE..."
 python -m clm_web.db --init
 log_step "Seeding database with default tenant and admin user..."
-uv run python seed_database.py --skip-cuad --skip-faiss
+# --skip-rag: the RAG knowledge base needs an embedding endpoint (Ollama). Keep
+# it out of this step so tenant + admin + the validation portfolio always land
+# even when Ollama is not running; the RAG index is built best-effort below.
+uv run python seed_database.py --skip-cuad --skip-faiss --skip-rag
 
 # Seed the synthetic validation portfolio: deterministic, offline, no LLM.
 # seed_contracts.py builds ContractCandidate objects from a fixed seed and
@@ -295,8 +298,15 @@ export EXTRACTION_RAG_DB="$RAG_DB"
 
 if [ ! -f "$RAG_DB" ]; then
   log_step "Building RAG index at $RAG_DB (first run, may take a minute)..."
-  python -m extraction_agent.build_rag_index
-  log_ok "RAG index built"
+  # Best-effort: the RAG index is for the extraction agent only - the query
+  # agent (and the reviewer tour) never read it. Needs Ollama nomic-embed-text.
+  if python -m extraction_agent.build_rag_index; then
+    log_ok "RAG index built"
+  else
+    log_warn "RAG index build failed (Ollama not running?) - extraction agent will"
+    log_warn "fall back to deterministic profiles. Build later with:"
+    log_warn "  uv run python -m extraction_agent.build_rag_index"
+  fi
 else
   log_ok "RAG index already exists at $RAG_DB"
 fi
