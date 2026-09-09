@@ -167,19 +167,19 @@ The `capstone-review-2026` snapshot is exactly:
 
 Each contract persists: parties (country code + role), 7 clauses with full text (Payment Terms, Governing Law, Term and Termination, plus a rotating set incl. Insurance, Indemnification, Limitation of Liability…), 1–3 obligations with descriptions and due dates, and an expiration date. Party names, clause set, and dates come from fixed pools, so re-seeding anywhere reproduces the same portfolio.
 
-**Expected answers for the quick-tour questions:**
+**Expected answers** (the query agent composes these from tool output with no LLM call — same result on any model):
 
 | Question | Answer |
 |---|---|
-| contracts by lifecycle status | active **24**, approved **15**, in_review **1** |
+| contracts by lifecycle status | 40 total — active **24**, approved **15**, in_review **1** |
 | active vendor agreements | **2** |
-| co-branding agreements | **4** |
-| contracts mentioning liability insurance | **13** (Insurance clause) |
+| co-branding agreements | **4** (with names) |
+| contracts mentioning liability insurance | **15** |
 | breakdown by type | distribution 7, MSA 6, services 5, amendment/co-branding/affiliate 4, vendor/reseller/license 3, nda 1 |
 
 ### What this validates
 
-The synthetic portfolio exercises the **query agent's reasoning**: planning multi-part questions, choosing filters, complete enumeration across types, and — above all — that counts are computed by deterministic tools rather than the model. A wrong answer here is attributable to the agent, not to data variance.
+The portfolio exercises the query agent's routing (choosing tools + filters) and enumeration. Counts, lists, and breakdowns are **computed by deterministic Python from `clm.sqlite3`** and templated into the answer — no model call, so a wrong number is a code bug, not model variance. The model is only invoked for **clause-synthesis** questions ("summarize our payment obligations"); those need a capable model and are slower on a small local one.
 
 ### What it does *not* validate
 
@@ -188,7 +188,7 @@ The synthetic portfolio exercises the **query agent's reasoning**: planning mult
 - **Value / effective-date questions.** The current seed path persists expiration dates and clause/obligation text but **not** `contract_value`, `effective_date`, or `execution_date` (dropped in the `seed_contracts.py` → `ingest_contract` mapping — a known gap). So `aggregate_contracts` sum/avg and "signed in 2024" filters return empty on this portfolio.
 - **Messy entity resolution, multi-currency aggregation, jurisdiction nuance.** The generator is tidy by construction.
 
-For depth on those, the CUAD dataset (opt-in) provides real contracts. The dataset strategy — offline-first defaults, a single contract-type catalog, and a real-contract stress corpus — is written up in [docs/adr/](docs/adr/) (ADR-0001…0003, currently *Proposed*).
+For depth on those, the CUAD dataset (opt-in) provides real contracts. The dataset strategy — offline-first defaults, a single contract-type catalog, a real-contract stress corpus, and the CC-BY licensing behind it — is written up in the ADRs under `docs/adr/` (proposed).
 
 ### CUAD grounding
 
@@ -232,20 +232,19 @@ User uploads PDF
 **Query Pipeline (Answer questions about contracts):**
 ```
 User asks: "Which contracts expire this quarter?"
-  → Gemma4 plans tool calls (here: list_contracts + expiring_within_days filter)
-  → Deterministic tools run over stored contracts (SQL, no LLM math)
+  → route: keyword + facet match → list_contracts(expiring_within_days=90)   (no LLM)
+  → deterministic tools run over clm.sqlite3 (SQL, no LLM math)
   → search_clauses (embeddings) only if the question needs clause text
-  → Gemma4 drafts the answer from tool results, with citations + confidence
-  → Verify: counts/lists authoritative; clause claims need cited evidence
+  → compose: structural answer templated from tool output (no LLM);
+             LLM draft only for clause synthesis
+  → verify: counts/lists authoritative; clause claims need cited evidence
 ```
 
 **Why this design:**
-- Gemma4: plans the question and drafts the prose — but not the numbers
-- Deterministic tools: every count, sum, and date filter (auditable, exact)
-- Nomic embeddings: clause-level semantic search, scoped to detail questions
-- SQLite: fast local storage
-- RAG (extraction only): CUAD examples → extraction consistency
-- Result: answers grounded in the stored contracts, numbers computed not guessed
+- Routing and structural composition are deterministic — a wrong count is a code bug, not model variance
+- Deterministic tools: every count, sum, and date filter, exact and auditable, in `contract_calc`
+- The model is used only for clause synthesis and the verify pass; the tour's count/list/breakdown questions are model-independent
+- RAG (`rag_knowledge.sqlite3`) is extraction-only — the query agent never reads it
 
 ---
 
