@@ -17,6 +17,7 @@ Cross-module documentation belongs here. Module-specific documentation remains b
 - [Architecture Decision Records](adr/README.md) - Significant architectural decisions, their context and consequences
   - [ADR-0001](adr/0001-offline-first-contract-data-and-type-catalog.md) (Proposed) - Offline-first contract data and a single contract-type catalog
   - [ADR-0002](adr/0002-query-agent-evaluation-substrate.md) (Proposed) - Bounded evaluation substrate for the query agent
+  - [ADR-0003](adr/0003-query-agent-stress-corpus.md) (Proposed) - Pre-built stress corpus for query-agent validation
 
 ## Domain and Implementation
 

@@ -27,3 +27,4 @@ We use [MADR](https://adr.github.io/madr/) (lightweight). Each record has:
 |---|---|---|
 | [0001](0001-offline-first-contract-data-and-type-catalog.md) | Proposed | Offline-first contract data and a single contract-type catalog |
 | [0002](0002-query-agent-evaluation-substrate.md) | Proposed | Bounded evaluation substrate for the query agent |
+| [0003](0003-query-agent-stress-corpus.md) | Proposed | Pre-built stress corpus for query-agent validation |
