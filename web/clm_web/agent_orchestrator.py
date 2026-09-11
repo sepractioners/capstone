@@ -67,6 +67,21 @@ class AgentOrchestrator:
         turns.extend(self._store.conversation_window(conversation_id, organization_id, max_turns=6))
         return turns
 
+    @staticmethod
+    def _clarify_round(history: list[dict[str, str]]) -> int:
+        """Consecutive trailing assistant turns that read as a clarification
+        question - the orchestrator's own count, passed to the query agent so it
+        can stop asking once ``QUERY_CLARIFY_MAX_ROUNDS`` is reached (ADR-0004
+        D3; mirrors the agent's own `_history_clarify_floor` backstop)."""
+        rounds = 0
+        for turn in reversed(history):
+            if turn.get("role") != "assistant":
+                continue
+            if not str(turn.get("text", "")).strip().endswith("?"):
+                break
+            rounds += 1
+        return rounds
+
     async def _refresh_summary(self, conversation_id: str, organization_id: str) -> None:
         window = self._store.conversation_window(conversation_id, organization_id, max_turns=20)
         if len(window) < _SUMMARY_MIN_TURNS:
@@ -86,7 +101,10 @@ class AgentOrchestrator:
     async def _analysis(
         self, organization_id: str, question: str, contract_id: str | None, history: list[dict[str, str]]
     ) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
-        result = await analyze_via_mcp(question, organization_id, contract_id, self._database_path, history)
+        clarify_round = self._clarify_round(history)
+        result = await analyze_via_mcp(
+            question, organization_id, contract_id, self._database_path, history, clarify_round
+        )
         trace = result.pop("debug_trace", []) or []
         if result.get("error"):
             failure = RuntimeError(result["error"].get("message", "analysis failed"))

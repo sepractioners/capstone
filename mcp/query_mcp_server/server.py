@@ -18,32 +18,50 @@ from .payload import ContractQueryRequest
 DEFAULT_DATABASE_PATH = os.environ.get("CLM_DATABASE_PATH", "clm.sqlite3")
 app = MCPServer(
     name="clm-query-mcp-server",
-    instructions="""Read-only CLM analysis boundary. Query and analyze contracts for organization.
+    instructions="""Read-only CLM analysis boundary. Every call is scoped to the
+caller's organization - there is no unscoped read. Counts, sums and date
+arithmetic are computed by the tools, never by the model.
 
-TOOL ROUTING GUIDE:
-1. analyze_contracts: Answer a question grounded in contract evidence (reasoning +
-   synthesis across clauses). "Do we have non-compete clauses?"
-2. find_contracts: Complete enumeration of contracts matching a text phrase and/or
-   filters. "Which vendor contracts expire in 90 days?" Discovery, not reasoning.
-3. search_clauses: Ranked clause snippets by keyword. Evidence retrieval / "show me
-   all liability caps".
-4. count_contracts: Counts, optionally filtered. "How many active NDAs?"
-5. list_contracts / aggregate_contracts: filtered rows / count|sum|avg|min|max of value.
+TOOL ROUTING GUIDE (full taxonomy: docs/query-agent-prompt-templates.md):
+1. analyze_contracts: a question that needs reasoning / synthesis across clauses -
+   "what are our biggest risks", "how is liability limited across the portfolio",
+   "what does the Acme indemnity say". Runs the plan -> gather -> synthesise loop.
+2. count_contracts: exact counts / breakdowns - "how many active NDAs", "break
+   down by type". Deterministic.
+3. list_contracts: the contracts matching a status/type/party/date/value filter.
+   detail="full" only for a small filtered set.
+4. find_contracts: EVERY contract whose clause/obligation text contains a phrase -
+   "which contracts require liability insurance", "do any have a non-compete".
+   Complete enumeration. Use this, NOT search_clauses, for "which contracts...".
+5. search_clauses: ranked clause snippets - the ONLY tool that returns real
+   clause text. Used for one-/few-contract DETAIL ("what does clause X say")
+   AND, called once per topic, for a portfolio-wide risk/exposure review -
+   find_contracts alone never returns text, only a match count.
+6. aggregate_contracts: count|sum|avg|min|max of contract value, optionally
+   grouped. The tool does the arithmetic.
 
-FILTERS: lifecycle_status and contract_type must be one of the values that exist in
-this portfolio (call count_contracts with no filter to see by_lifecycle_status /
-by_contract_type keys). Pass the stored spelling ("vendor-agreement"), not the
-user's words ("vendor agreements").
+find_contracts vs search_clauses: "which contracts mention X" -> find_contracts
+(scans every contract, exact matched count, no text). "what does X say" ->
+search_clauses (ranked detail, a sample, real text). A risk/exposure review
+across several topics needs BOTH per topic - find_contracts to size the
+matched set, search_clauses to read it; a topic checked with find_contracts
+but never passed to search_clauses has no basis for a claim in the answer.
+
+FILTERS: lifecycle_status and contract_type must be a value that exists in this
+organization's portfolio (call count_contracts with no filter to see the
+by_lifecycle_status / by_contract_type keys). Pass the stored spelling
+("vendor-agreement"), not the user's words ("vendor agreements").
 
 RESULT PRECEDENCE: count_contracts returns `matched` (respects the filter) plus
 `by_lifecycle_status` / `by_contract_type` (whole portfolio, ignore the filter).
 When a filter is set, `matched` is the answer - never a number from a by_* block.
 
-KEY HEURISTICS:
-- Portfolio queries (contract_id=None): "Do we have X?" "List all Y contracts"
-- Specific queries (contract_id=<uuid>): "In this contract, what is X?"
-- Escalate to "Not covered" if evidence <50% relevant
-- Separate facts (stated) from implications (inferred)
+COVERAGE: when an answer is synthesised from a sample of a larger matched set,
+say so and offer the exact count or a narrower filter - never imply it covered
+every contract.
+
+ESCALATE: legal advice, market comparison, or predictions are out of scope -
+report what the contracts state, not what the user should do.
 """,
 )
 _dependencies: Dependencies | None = None
@@ -78,18 +96,27 @@ async def analyze_contracts(request: ContractQueryRequest) -> dict:
     - If retrieved evidence <50% relevant: return "Not covered in contracts"
     - If multiple contradictory clauses found: return all with confidence scores
     - If question requires inference: flag "Not stated; inferred from..."
+    - If the question doesn't project onto any routing template (planner declined
+      AND deterministic keyword/facet routing found nothing): the agent never
+      guesses a plan - it returns `needs_clarification=true` with a targeted
+      question. Pass `clarify_round` = how many consecutive clarification turns
+      this conversation already had; the caller should present the terminal
+      answer itself (not call again) once the agent's QUERY_CLARIFY_MAX_ROUNDS
+      is reached - the agent also gates this itself as a backstop.
 
     SCOPE BOUNDARIES:
     - IN: Terms, obligations, dates, conditions explicitly stated in contract
     - OUT: Industry practices, regulatory requirements, "should be there"
 
-    RETURNS: {question, answer, sources[], grounded, debug_trace}
+    RETURNS: {question, answer, needs_clarification, sources[], grounded, debug_trace}
     """
     contracts = contracts_for_organization(
         get_dependencies(), DEFAULT_DATABASE_PATH, request.organization_id, request.contract_id
     )
     try:
-        result = await answer(request.question, contracts, request.contract_id, request.history)
+        result = await answer(
+            request.question, contracts, request.contract_id, request.history, request.clarify_round
+        )
     except Exception as exc:  # noqa: BLE001 - keep the partial trace on failure
         return {
             "question": request.question,
@@ -174,6 +201,10 @@ def search_clauses(organization_id: str, query: str, limit: int = 8) -> list[dic
     - Internal step in query agent's reasoning (retrieves evidence before answering)
     - Direct search for specific clause text: "Find all liability caps"
     - Building fact-checking evidence: "What exactly does the contract say about..."
+    - Portfolio-wide risk/exposure review: call ONCE PER NAMED TOPIC (e.g.
+      "indemnification", "limitation of liability", "termination for
+      convenience", "auto-renewal") - each call only returns text for its own
+      query; a topic never passed here has no clause text anywhere in scope.
 
     PROMPT EXAMPLES:
     1. "Show me renewal clauses"

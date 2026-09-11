@@ -43,6 +43,8 @@ Track hypotheses about agent architecture, prompts, and MCP usage. Proven hypoth
 - Query MCP already accepts `history: list[ConversationTurn]`
 - Portal already sends history to query agent
 - Need benchmark: evaluate 30 conversation chains with/without history
+- Routing home: the *multi-turn follow-up* handling in the prompt-template
+  catalogue (`agents/query_agent/README.md` → Original hypothesis → template mapping)
 
 **Heuristic Candidate** (if validated): "Always pass history for conversational queries; omit only for one-shot questions"
 
@@ -62,8 +64,13 @@ Track hypotheses about agent architecture, prompts, and MCP usage. Proven hypoth
 
 **Current Status**: **DEPLOYED (Post-Enhancement)**
 - Tool descriptions now include routing examples, prompt patterns, anti-patterns
-- Need retrospective evaluation: sample queries from 2 weeks pre/post enhancement
-- Next step: Design evaluation suite (50 queries, categorized by tool/parameter complexity)
+- Query agent: superseded by the prompt-template catalogue - the planner names a
+  template (an embedded description = tool allowlist + cues + scaffold) rather
+  than picking raw tools. See `agents/query_agent/prompts/templates.yaml` and the
+  hypothesis → template mapping in `agents/query_agent/README.md`. ADR-0004.
+- Next step: `platform_testing/probe/query_agent_probe.py` scores the resolved
+  plan against `expect_plan` per question - that is the H3 eval suite for the
+  query agent.
 
 **Heuristic Candidate** (if validated): "Always embed routing examples and anti-patterns in tool descriptions; update when adding new capabilities"
 
@@ -102,10 +109,25 @@ Track hypotheses about agent architecture, prompts, and MCP usage. Proven hypoth
 - Treatment: Structured system prompt (explicit Goal/Constraints/Escalate)
 - Metric: Hallucination rate (incorrect claims not in contract), escalation rate (correct "not covered"), false positives
 
-**Current Status**: **HYPOTHESIS ONLY**
-- Query agent system prompt (agents/query_agent/prompts.py) needs audit
-- Extraction agent system prompt needs similar audit
-- Need to implement structured prompts if not present
+**Current Status**: **PARTIALLY IMPLEMENTED (query agent)**
+- Each prompt template (`agents/query_agent/prompts/templates.yaml`) carries a
+  goal + constraints scaffold; the `coverage` rule is the "don't overclaim"
+  constraint; `T12_out_of_scope` is the explicit escalate path. Mapped in
+  `agents/query_agent/README.md` → Original hypothesis → template mapping.
+- Extraction agent system prompt needs similar audit.
+- Eval: run `platform_testing/probe/query_agent_probe.py` on answerable +
+  unanswerable questions; score hallucination / escalation rate.
+- **Live A/B evidence this session** (see
+  [MCP_HEURISTICS.md Pattern 6](MCP_HEURISTICS.md#pattern-6-structured-reasoning-scaffolds)
+  for detail): explicit constraints reduced but did not eliminate
+  hallucination - example categories placed next to a "don't invent"
+  constraint got copied in regardless of evidence until the examples
+  themselves were removed; a structural constraint reworded twice was still
+  not followed by `llama3.2:3b`. The hypothesis's ≥40% hallucination-rate
+  target has not been formally scored against the probe yet - the evidence so
+  far is qualitative (single A/B comparisons, not the 100-query sample this
+  hypothesis specifies) and should not be read as the hypothesis being fully
+  validated, only partially supported with an important caveat attached.
 
 **Heuristic Candidate** (if validated): "Always structure system prompts: Goal → Sub-goals → Constraints → Trade-offs → Escalate conditions"
 
@@ -140,22 +162,45 @@ Track hypotheses about agent architecture, prompts, and MCP usage. Proven hypoth
 
 **Validation**: Week 1 capstone development. Extraction agent achieves consistent results with small local model + good examples vs. larger cloud model without examples.
 
-**Promoted Heuristic**: [MCP_HEURISTICS.md Insight 1](MCP_HEURISTICS.md#insight-1-better-data-than-better-models)
+**Promoted Heuristic**: [MCP_HEURISTICS.md Pattern 5](MCP_HEURISTICS.md#pattern-5-better-data-than-bigger-models)
 - Always provide examples during extraction
 - Build better training data; don't chase larger models
 - Applied to: Extraction RAG index, Query agent examples
+- **Newer evidence** (query agent, live-tested): the same pattern one level
+  down from model choice - an explicit decision spec inside one template's
+  scaffold (T1's group-by derivation table) fixed a real planning judgment
+  call on the first live run, same principle as CUAD examples. See Pattern 5.
 
 ---
 
-### VH2: Structured Cognitive Loops Prevent Hallucination ✅
+### VH2: Structured Reasoning Scaffolds Prevent Hallucination ✅
+
+*(Renamed from "Structured Cognitive Loops" - the shape is a fixed structure
+for one prompt, not an iterative loop; the name was misleading. See
+[MCP_HEURISTICS.md Pattern 6](MCP_HEURISTICS.md#pattern-6-structured-reasoning-scaffolds)
+for the full correction and the query agent's actual loops - which are a
+separate concept documented in
+[ADR-0004 D3](docs/adr/0004-query-agent-routing-and-retrieval.md) and
+[ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md).)*
 
 **Original Hypothesis**: System prompts with Goal → Sub-goals → Constraints → Conditions prevent hallucination and inconsistency.
 
 **Validation**: Week 1 capstone. Extraction agent structure (extract only text, no inference) + Query agent structure (escalate on weak evidence) both empirically prevent errors without requiring model size increase.
 
-**Promoted Heuristic**: [MCP_HEURISTICS.md Insight 2](MCP_HEURISTICS.md#insight-2-structured-cognitive-loops)
+**Promoted Heuristic**: [MCP_HEURISTICS.md Pattern 6](MCP_HEURISTICS.md#pattern-6-structured-reasoning-scaffolds)
 - Use structured system prompts for all agent capabilities
 - Define explicit constraints, trade-offs, escalation conditions
+- **Important refinement, found empirically this session**: a clearly-stated
+  constraint is necessary but not sufficient on a small model. Two concrete
+  findings, both in Pattern 6: (1) example categories sitting next to a
+  constraint got copied into output regardless of evidence - fixed by
+  removing the examples, not by restating the constraint; (2) a
+  structural instruction ("one point per clause, not per dimension") was
+  ignored by `llama3.2:3b` twice in a row despite being reworded and
+  reinforced - evidence that some instructions are past what a given model
+  size will execute, not a wording problem. The mitigation is bounding the
+  blast radius (independent verification, bounded self-correction, a safe
+  deterministic fallback), not a fourth rewording attempt.
 - Applied to: Extraction agent (Goal → Sub-goals → Constraints → Retry/Escalate), Query agent (Goal → Sub-goals → Constraints → Escalate)
 
 ---

@@ -1,6 +1,15 @@
-"""Query agent: plan (tree of thought) -> gather -> interpret -> draft -> verify.
+"""Query agent: plan (template routing) -> gather -> interpret -> draft -> verify.
 
-All LLM calls are mocked; the deterministic portfolio tools run for real.
+All LLM calls are mocked; the deterministic portfolio tools run for real. Tool
+*selection* is the planner's job (it names a template, which fixes the tool
+allowlist); `_guard_plan` only does filter-value hygiene + allowlist enforcement
++ the fixed fallback. The degraded router (`_deterministic_route`) is what runs
+when `QUERY_PLAN_TOOLS=0`.
+
+Two bounded in-request self-correction loops sit inside `answer()` (see the
+"replan" and "redraft" tests below) - both default to at most one extra round
+(`config.gather_replan_max_rounds` / `config.draft_reverify_max_rounds`) and
+both exhaust to the pre-loop behaviour unchanged.
 """
 from __future__ import annotations
 
@@ -18,12 +27,24 @@ from query_agent.agent import QueryAnswer, answer
 _RANK = dict(side_effect=lambda q, r, k, c=None: ([(0.8, x) for x in r[:k]], {"mode": "test"}))
 
 
+@pytest.fixture(autouse=True)
+def _pinned_config():
+    """Pin the reasoning-loop config so the suite is independent of the local
+    .env. LLM planner on, LLM draft always (deterministic compose off) so the
+    mocked draft is exercised, interpret + verify on."""
+    cfg = dataclasses.replace(
+        agent.config, plan_tools=True, interpret=True, verify=True, deterministic_compose=False
+    )
+    with patch.object(agent, "config", cfg):
+        yield cfg
+
+
 def _resp(parsed):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))])
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed, content=""))])
 
 
-def _plan(*tools):
-    return agent._Plan(calls=[agent._ToolCall(**t) for t in tools])
+def _plan(*tools, template=""):
+    return agent._Plan(template=template, calls=[agent._ToolCall(**t) for t in tools])
 
 
 CONTRACTS = [
@@ -46,15 +67,18 @@ CONTRACTS = [
     },
 ]
 
+_FACETS = {"lifecycle_status": ["active", "in_review"], "contract_type": ["services-agreement", "nda"]}
+
 
 def _run(question, contracts=CONTRACTS, **kw):
     return asyncio.run(answer(question, contracts, **kw))
 
 
+# --------------------------------------------------------------- planner routing
 def test_count_question_routes_to_count_contracts_with_no_retrieval() -> None:
     draft = QueryAnswer(answer="2 contracts are active.", confidence=0.95, citations=[])
     calls = AsyncMock(side_effect=[
-        _resp(_plan({"tool": "count_contracts", "lifecycle_status": "active"})),
+        _resp(_plan({"tool": "count_contracts", "lifecycle_status": "active"}, template="T1_portfolio_census")),
         _resp(draft),
         _resp(agent._Verification(supported=True, adjusted_confidence=0.95)),
     ])
@@ -75,7 +99,7 @@ def test_clause_question_routes_to_search_and_runs_interpret() -> None:
         citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
     )
     calls = AsyncMock(side_effect=[
-        _resp(_plan({"tool": "search_clauses", "query": "payment terms"})),
+        _resp(_plan({"tool": "search_clauses", "query": "payment terms"}, template="T6_clause_detail")),
         _resp(agent._Interpretation()),
         _resp(draft),
         _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
@@ -88,12 +112,15 @@ def test_clause_question_routes_to_search_and_runs_interpret() -> None:
     assert any(s["phase"] == "interpret" for s in agent.get_trace())
 
 
-def test_mixed_question_emits_both_count_and_search() -> None:
+def test_mixed_question_emits_list_and_search_within_one_template() -> None:
+    """A "how many X and what do their clauses say" question -> T6_clause_detail:
+    list_contracts for the set + search_clauses for the terms."""
     draft = QueryAnswer(answer="2 active; termination on 30 days notice.", confidence=0.85, citations=[])
     calls = AsyncMock(side_effect=[
         _resp(_plan(
-            {"tool": "count_contracts", "lifecycle_status": "active"},
+            {"tool": "list_contracts", "lifecycle_status": "active"},
             {"tool": "search_clauses", "query": "termination"},
+            template="T6_clause_detail",
         )),
         _resp(agent._Interpretation()),
         _resp(draft),
@@ -103,42 +130,118 @@ def test_mixed_question_emits_both_count_and_search() -> None:
         result = _run("How many active contracts and what are their termination terms?")
 
     phases = [s["phase"] for s in agent.get_trace()]
-    assert "tool:count_contracts" in phases and "rank_evidence" in phases
+    assert "tool:list_contracts" in phases and "rank_evidence" in phases
     assert result.answer.startswith("2 active")
 
 
-def test_which_contracts_have_clause_uses_find_contracts_not_a_sample() -> None:
+def test_guard_drops_calls_outside_the_named_template_allowlist() -> None:
+    """T1_portfolio_census allows only count/aggregate - a search_clauses call the
+    planner slipped in is dropped, not run."""
+    draft = QueryAnswer(answer="3 contracts.", confidence=0.9, citations=[])
+    calls = AsyncMock(side_effect=[
+        _resp(_plan(
+            {"tool": "count_contracts"},
+            {"tool": "search_clauses", "query": "anything"},
+            template="T1_portfolio_census",
+        )),
+        _resp(draft),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
+    ])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        _run("How many contracts do we have?")
+
+    phases = [s["phase"] for s in agent.get_trace()]
+    assert "tool:count_contracts" in phases
+    assert "rank_evidence" not in phases  # the out-of-allowlist search_clauses was dropped
+
+
+def test_unroutable_question_asks_for_clarification() -> None:
+    """Planner returns nothing usable, and the question has no keyword/filter
+    signal for the deterministic backstop either -> ADR-0004 D3: ask the human,
+    never fabricate a plan. Only the plan LLM call happens - no gather, no
+    interpret, no draft, no verify."""
+    calls = AsyncMock(side_effect=[_resp(agent._Plan())])  # planner returned nothing usable
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("What are the most significant contractual risks across our portfolio?")
+
+    assert result.needs_clarification is True
+    assert result.uncertain is True
+    assert calls.await_count == 1  # plan only
+
+    trace = agent.get_trace()
+    resolved = next(s for s in trace if s["phase"] == "plan_resolved")["output"]
+    assert resolved["calls"] == []
+    assert not any(s["phase"].startswith("tool:") for s in trace)
+    assert not any(s["phase"] in ("draft_answer", "verify") for s in trace)
+
+
+def test_clarify_gate_stops_asking_and_returns_a_terminal_answer() -> None:
+    """clarify_round already at the configured max -> a terminal answer, not
+    another question - the loop must terminate."""
+    calls = AsyncMock(side_effect=[_resp(agent._Plan())])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run(
+            "What are the most significant contractual risks across our portfolio?",
+            clarify_round=agent.config.clarify_max_rounds,
+        )
+
+    assert result.needs_clarification is False
+    assert result.answer == agent._TERMINAL_UNROUTED_TEXT
+
+
+# ----------------------------------------------------------- degraded-mode router
+def test_deterministic_route_maps_questions_to_templates() -> None:
+    cases = {
+        "How many contracts do we have, by lifecycle status?": ("T1_portfolio_census", ["count_contracts"]),
+        "List all nda agreements": ("T2_filtered_roster", ["list_contracts"]),
+        "Which contracts mention liability insurance?": ("T3_clause_presence", ["find_contracts"]),
+        "What is the total value of our active contracts?": ("T4_financial_rollup", ["aggregate_contracts"]),
+        "What are our payment obligations across all contracts?":
+            ("T7_cross_contract_synthesis", ["find_contracts", "search_clauses"]),
+    }
+    for question, (template, tools) in cases.items():
+        plan = agent._guard_plan(question, agent._deterministic_route(question, _FACETS), _FACETS)
+        assert plan.template == template, question
+        assert [c.tool for c in plan.calls] == tools, question
+
+
+def test_deterministic_route_unknown_question_yields_no_plan() -> None:
+    """No keyword, filter, or clause signal -> an empty plan, not a guess.
+    _plan()/answer() turn this into a clarification, not a fabricated call."""
+    question = "What are the most significant contractual risks across our portfolio?"
+    plan = agent._guard_plan(question, agent._deterministic_route(question, _FACETS), _FACETS)
+    assert plan.template == ""
+    assert plan.calls == []
+
+
+def test_which_contracts_have_clause_enumerates_completely() -> None:
     contracts = [
         {**CONTRACTS[0], "clauses": [{"heading": "Insurance", "text": "maintain liability insurance"}]},
         {**CONTRACTS[1], "clauses": [{"heading": "Insurance", "text": "carry liability insurance"}]},
         {**CONTRACTS[2], "clauses": [{"heading": "Term", "text": "one year"}]},
     ]
     draft = QueryAnswer(answer="2 contracts require liability insurance.", confidence=0.9, citations=[])
-    calls = AsyncMock(side_effect=[
-        # planner wrongly picks search_clauses; the guard adds find_contracts
-        _resp(_plan({"tool": "search_clauses", "query": "liability insurance"})),
-        _resp(agent._Interpretation()),
+    calls = AsyncMock(side_effect=[  # T3 -> find_contracts only, no snippets, no interpret
+        _resp(_plan({"tool": "find_contracts", "query": "liability insurance"}, template="T3_clause_presence")),
         _resp(draft),
         _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
     ])
     with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
         result = _run("Which contracts require liability insurance?", contracts)
 
-    trace = agent.get_trace()
-    find = next(s for s in trace if s["phase"] == "tool:find_contracts")
+    find = next(s for s in agent.get_trace() if s["phase"] == "tool:find_contracts")
     assert find["output"]["matched"] == 2
     assert result.answer.startswith("2 contracts")
 
 
-def test_math_question_routes_to_aggregate_contracts() -> None:
+def test_math_question_uses_tool_computed_value() -> None:
     contracts = [
         {**CONTRACTS[0], "commercial_terms": {"total_value": {"amount": "1000", "currency": "USD"}}},
         {**CONTRACTS[1], "commercial_terms": {"total_value": {"amount": "3000", "currency": "USD"}}},
     ]
     draft = QueryAnswer(answer="The active contracts are worth $4000 in total.", confidence=0.95, citations=[])
     calls = AsyncMock(side_effect=[
-        _resp(_plan({"tool": "search_clauses", "query": "value"})),  # planner misses the math need
-        _resp(agent._Interpretation()),
+        _resp(_plan({"tool": "aggregate_contracts", "measure": "sum_value"}, template="T4_financial_rollup")),
         _resp(draft),
         _resp(agent._Verification(supported=True, adjusted_confidence=0.95)),
     ])
@@ -150,71 +253,249 @@ def test_math_question_routes_to_aggregate_contracts() -> None:
     assert agg["output"]["value"] == "4000"
 
 
-def test_portfolio_wide_clause_question_enumerates_with_find_contracts() -> None:
+# --------------------------------------------------------------------- coverage
+def test_coverage_record_flags_a_portfolio_spanning_synthesis() -> None:
     contracts = [
-        {**CONTRACTS[0], "clauses": [{"heading": "Payment", "text": "Customer shall make payment within 30 days"}]},
-        {**CONTRACTS[1], "clauses": [{"heading": "Payment", "text": "payment due on invoice"}]},
-        {**CONTRACTS[2], "clauses": [{"heading": "Term", "text": "one year"}]},
+        {**CONTRACTS[0], "clauses": [{"heading": "Payment", "text": f"pay obligation {i}"}]}
+        for i in range(40)
     ]
-    draft = QueryAnswer(answer="Two contracts carry payment obligations.", confidence=0.9, citations=[])
+    for i, c in enumerate(contracts):
+        c["id"], c["contract_number"] = f"x{i}", f"IMPORT-{i}"
+    draft = QueryAnswer(answer="Across the 40 matching contracts (a sample of the evidence): ...", confidence=0.6, citations=[])
     calls = AsyncMock(side_effect=[
-        _resp(_plan({"tool": "search_clauses", "query": "payment"})),  # planner picks only search
+        _resp(_plan(
+            {"tool": "find_contracts", "query": "payment"},
+            {"tool": "search_clauses", "query": "payment"},
+            template="T7_cross_contract_synthesis",
+        )),
         _resp(agent._Interpretation()),
         _resp(draft),
-        _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.6)),
     ])
     with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
-        _run("What are our payment obligations across all contracts?", contracts)
+        _run("What payment obligations do we have across all contracts?", contracts)
 
-    find = next(s for s in agent.get_trace() if s["phase"] == "tool:find_contracts")
-    assert find["output"]["matched"] == 2
+    cov = next(s for s in agent.get_trace() if s["phase"] == "coverage")["memory"]
+    assert cov["matched"] == 40 and cov["spans_portfolio"] is True
 
 
-def test_keyword_guard_forces_count_when_planner_misses_it() -> None:
-    draft = QueryAnswer(answer="ok", confidence=0.7, citations=[])
+def test_deterministic_compose_notes_a_capped_list() -> None:
+    contracts = []
+    for i in range(30):
+        contracts.append({
+            "id": f"v{i}", "contract_number": f"IMPORT-{i}", "title": f"Vendor {i}",
+            "lifecycle_status": "active", "contract_type": "nda",
+            "parties": [], "clauses": [], "key_dates": {}, "commercial_terms": {},
+        })
+    cfg = dataclasses.replace(agent.config, deterministic_compose=True, verify=False)
     calls = AsyncMock(side_effect=[
-        _resp(_plan({"tool": "search_clauses", "query": "contracts"})),  # planner wrongly chose search only
+        _resp(_plan({"tool": "list_contracts", "contract_type": "nda"}, template="T2_filtered_roster")),
+    ])
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("List all nda agreements", contracts)
+
+    assert "capped" in result.answer.lower() or "more" in result.answer.lower()
+    assert result.uncertain is True
+
+
+# ------------------------------------------------------- self-correction: replan
+def test_replan_recovers_when_gather_is_thin_for_a_synthesis_template() -> None:
+    """T9 (mode S - needs real synthesis) resolves a plan with only
+    find_contracts (no clause text). The bounded replan loop fires once; the
+    second plan names search_clauses too, so interpret/draft/verify all run
+    against real evidence this time."""
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "find_contracts", "query": "payment"}, template="T9_risk_exposure_review")),
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T9_risk_exposure_review")),
         _resp(agent._Interpretation()),
-        _resp(draft),
+        _resp(QueryAnswer(answer="Payment terms vary by contract.", confidence=0.7, citations=[])),
         _resp(agent._Verification(supported=True, adjusted_confidence=0.7)),
     ])
     with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
-        _run("How many contracts do we have?")
+        result = _run("What are our biggest risks?")
 
-    assert any(s["phase"] == "tool:count_contracts" for s in agent.get_trace())
-
-
-def test_plan_failure_falls_back_to_the_default_plan() -> None:
-    draft = QueryAnswer(answer="ok", confidence=0.6, citations=[])
-    calls = AsyncMock(side_effect=[_resp(None), _resp(agent._Interpretation()), _resp(draft), _resp(None)])
-    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
-        result = _run("What are the terms and who signed it?")
-
-    assert result.answer == "ok"
-    assert any(s["phase"] == "tool:count_contracts" for s in agent.get_trace())
+    assert calls.await_count == 5  # plan, replan, interpret, draft, verify
+    trace = agent.get_trace()
+    resolved = [s for s in trace if s["phase"] == "plan_resolved"]
+    assert len(resolved) == 2
+    assert "replan round 1/1" in resolved[1]["note"]
+    assert any(s["phase"] == "interpret" for s in trace)  # the replan actually got real evidence
+    assert result.answer == "Payment terms vary by contract."
 
 
+def test_replan_exhausted_falls_through_to_deterministic_compose() -> None:
+    """T9 resolves find_contracts-only twice in a row - still no clause text
+    after the one allowed replan round. Exhausts and falls through exactly as
+    it would with no replan loop at all: interpret skips itself, the
+    deterministic composer ships a safe, fully-cited, thinner answer."""
+    cfg = dataclasses.replace(agent.config, deterministic_compose=True)
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "find_contracts", "query": "indemnification"}, template="T9_risk_exposure_review")),
+        _resp(_plan({"tool": "find_contracts", "query": "liability"}, template="T9_risk_exposure_review")),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
+    ])
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("What are our biggest risks?")
+
+    assert calls.await_count == 3  # plan, replan, verify - no interpret call, no LLM draft
+    trace = agent.get_trace()
+    assert [s["phase"] for s in trace].count("plan_resolved") == 2
+    interpret_step = next(s for s in trace if s["phase"] == "interpret")
+    assert "skipped" in interpret_step["note"]
+    draft_step = next(s for s in trace if s["phase"] == "draft_answer")
+    assert "deterministic compose" in draft_step["note"]
+    # the replan *replaces* the plan, not merges with it - gather() only ever
+    # sees the most recent round's calls, so only "liability" (round 2) shows.
+    assert "liability" in result.answer
+
+
+def test_gather_replan_can_be_disabled() -> None:
+    """QUERY_GATHER_REPLAN_MAX_ROUNDS=0 - a thin T9 gather falls straight
+    through with no replan attempt at all, same as the exhausted case but in
+    one fewer LLM call."""
+    cfg = dataclasses.replace(agent.config, gather_replan_max_rounds=0, deterministic_compose=True)
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "find_contracts", "query": "indemnification"}, template="T9_risk_exposure_review")),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
+    ])
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("What are our biggest risks?")
+
+    assert calls.await_count == 2  # plan, verify - no replan
+    assert [s["phase"] for s in agent.get_trace()].count("plan_resolved") == 1
+    assert "indemnification" in result.answer
+
+
+# ------------------------------------------------------------------------- verify
 def test_verify_drops_unsupported_citations_and_lowers_confidence() -> None:
+    """Pinned to no redraft rounds - isolates the confidence-capping /
+    citation-dropping mechanism itself from the redraft-loop tests below."""
+    cfg = dataclasses.replace(agent.config, draft_reverify_max_rounds=0)
     draft = QueryAnswer(
         answer="Payment is annual.", confidence=0.95,
         citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
     )
     calls = AsyncMock(side_effect=[
-        _resp(_plan({"tool": "search_clauses", "query": "payment"})),
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T6_clause_detail")),
         _resp(agent._Interpretation()),
         _resp(draft),
         _resp(agent._Verification(supported=False, adjusted_confidence=0.2, unsupported_citation_labels=["clause:Payment"])),
     ])
-    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
         result = _run("Is payment annual?")
 
     assert result.citations == []
     assert result.confidence == 0.2 and result.uncertain is True
 
 
+# ------------------------------------------------------- self-correction: redraft
+def test_redraft_recovers_when_verify_flags_unsupported_claims() -> None:
+    """verify() flags the first draft's citation as unsupported - the bounded
+    redraft loop fires once, the second draft is clean, and that is what
+    ships (not the confidence-capped original)."""
+    draft1 = QueryAnswer(
+        answer="Payment is annual.", confidence=0.95,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    draft2 = QueryAnswer(answer="Payment terms are not stated as annual in the evidence.", confidence=0.8, citations=[])
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T6_clause_detail")),
+        _resp(agent._Interpretation()),
+        _resp(draft1),
+        _resp(agent._Verification(supported=False, adjusted_confidence=0.2, unsupported_citation_labels=["clause:Payment"])),
+        _resp(draft2),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.8)),
+    ])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("Is payment annual?")
+
+    assert calls.await_count == 6  # plan, interpret, draft1, verify1, draft2 (redraft), verify2
+    assert result.answer == draft2.answer
+    assert result.confidence == 0.8
+
+
+def test_redraft_exhausted_ships_capped_confidence() -> None:
+    """verify() still flags the redraft (unsupported both rounds) - exhausts
+    after the one allowed round and ships the last draft with the existing
+    confidence cap unchanged. Never a third attempt."""
+    draft1 = QueryAnswer(
+        answer="Payment is annual.", confidence=0.95,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    draft2 = QueryAnswer(
+        answer="Payment is definitely annual, trust me.", confidence=0.9,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T6_clause_detail")),
+        _resp(agent._Interpretation()),
+        _resp(draft1),
+        _resp(agent._Verification(supported=False, adjusted_confidence=0.2, unsupported_citation_labels=["clause:Payment"])),
+        _resp(draft2),
+        _resp(agent._Verification(supported=False, adjusted_confidence=0.15, unsupported_citation_labels=["clause:Payment"])),
+    ])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("Is payment annual?")
+
+    assert calls.await_count == 6  # plan, interpret, draft1, verify1, draft2 (redraft), verify2 - no third attempt
+    assert result.citations == []
+    assert result.confidence == 0.15 and result.uncertain is True
+
+
+def test_draft_reverify_can_be_disabled() -> None:
+    """QUERY_DRAFT_REVERIFY_MAX_ROUNDS=0 - verify flags the draft but ships it
+    with the confidence cap, same as the exhausted case, in one fewer round."""
+    cfg = dataclasses.replace(agent.config, draft_reverify_max_rounds=0)
+    draft = QueryAnswer(
+        answer="Payment is annual.", confidence=0.95,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T6_clause_detail")),
+        _resp(agent._Interpretation()),
+        _resp(draft),
+        _resp(agent._Verification(supported=False, adjusted_confidence=0.2, unsupported_citation_labels=["clause:Payment"])),
+    ])
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("Is payment annual?")
+
+    assert calls.await_count == 4  # plan, interpret, draft, verify - no redraft
+    assert result.confidence == 0.2
+
+
+def test_happy_path_never_triggers_either_self_correction_loop() -> None:
+    """Neither loop adds a call when nothing is wrong: gather gets real
+    evidence on the first try and verify is satisfied on the first draft."""
+    draft = QueryAnswer(
+        answer="Customer pays within thirty days.", confidence=0.9,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "search_clauses", "query": "payment terms"}, template="T6_clause_detail")),
+        _resp(agent._Interpretation()),
+        _resp(draft),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
+    ])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("What does the payment clause say?")
+
+    assert calls.await_count == 4  # plan, interpret, draft, verify - no replan, no redraft
+    trace = agent.get_trace()
+    assert [s["phase"] for s in trace].count("plan_resolved") == 1
+    assert [s["phase"] for s in trace].count("draft_answer") == 1
+    assert result.answer == draft.answer
+
+
 def test_verify_can_be_disabled() -> None:
     draft = QueryAnswer(answer="ok", confidence=0.6, citations=[])
-    calls = AsyncMock(side_effect=[_resp(_plan({"tool": "count_contracts"})), _resp(draft)])
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "count_contracts"}, template="T1_portfolio_census")), _resp(draft),
+    ])
     no_verify = dataclasses.replace(agent.config, verify=False)
     with patch.object(agent, "config", no_verify), patch.object(llm_client, "acompletion", new=calls), patch.object(
         agent, "rank_with_scores", **_RANK
@@ -229,10 +510,11 @@ def test_no_tenant_contract_raises() -> None:
         _run("q", contract_id="other")
 
 
-def test_full_trace_captures_plan_tools_and_timing() -> None:
+def test_full_trace_captures_prompt_and_timing() -> None:
     draft = QueryAnswer(answer="120 contracts.", confidence=0.9, citations=[])
     calls = AsyncMock(side_effect=[
-        _resp(agent._Plan(reasoning="count branch", calls=[agent._ToolCall(tool="count_contracts")])),
+        _resp(agent._Plan(reasoning="census", template="T1_portfolio_census",
+                          calls=[agent._ToolCall(tool="count_contracts")])),
         _resp(draft),
         _resp(agent._Verification(reasoning="matches", supported=True, adjusted_confidence=0.9)),
     ])
@@ -242,7 +524,7 @@ def test_full_trace_captures_plan_tools_and_timing() -> None:
     trace = agent.get_trace()
     phases = [s["phase"] for s in trace]
     assert phases[0] == "context"
-    for expected in ("plan", "plan_resolved", "tool:count_contracts", "draft_answer", "verify", "result"):
+    for expected in ("plan", "plan_resolved", "tool:count_contracts", "coverage", "draft_answer", "verify", "result"):
         assert expected in phases
     plan_step = next(s for s in trace if s["phase"] == "plan")
     assert plan_step["system_prompt"] == agent._PLAN_PROMPT

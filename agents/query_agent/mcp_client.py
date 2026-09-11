@@ -35,8 +35,15 @@ async def analyze_via_mcp(
     contract_id: str | None = None,
     database_path: str | None = None,
     history: list[dict[str, str]] | None = None,
+    clarify_round: int = 0,
 ) -> dict[str, Any]:
-    """Call the CLM MCP analysis tool with API-authorized organization context."""
+    """Call the CLM MCP analysis tool with API-authorized organization context.
+
+    ``clarify_round``: consecutive clarification turns this conversation already
+    had (0 for a fresh question) - see ``ContractQueryRequest.clarify_round`` /
+    ADR-0004 D3. The caller (the orchestrator) owns tracking this and should stop
+    calling once it reaches the agent's ``QUERY_CLARIFY_MAX_ROUNDS``.
+    """
     return await _call_tool(
         "analyze_contracts",
         {
@@ -45,6 +52,7 @@ async def analyze_via_mcp(
                 "organization_id": organization_id,
                 "contract_id": contract_id,
                 "history": history or [],
+                "clarify_round": clarify_round,
             }
         },
         database_path,

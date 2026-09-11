@@ -600,6 +600,83 @@ metadata={
 
 Admin Console displays this for debugging failed extractions.
 
+### Pattern 5: Better Data Than Bigger Models
+
+**Heuristic**: a well-specified example set or decision spec substitutes for
+raw model scale more reliably than switching to a larger model.
+
+**Original evidence** (Week 1 capstone): the extraction agent with a small
+local model + CUAD-grounded RAG examples produced more consistent results than
+a larger cloud model with no grounding examples.
+
+**Newer evidence** (query agent, this session): the same pattern shows up one
+level down, at the *planning* decision inside a single template, not just at
+the model-selection level. T1's original scaffold told the planner "call
+`aggregate_contracts` for a grouped breakdown" with no rule for *which*
+`group_by` value to pick - a genuine judgment call every time. Adding an
+explicit decision table directly to the scaffold ("'by status' -> lifecycle_status,
+'by type' -> contract_type...") fixed it on the very first live run against a
+real model (`gemma4:latest`) - the resolved plan's own `reasoning` field
+echoed the rule back verbatim. Same principle as CUAD examples: a concrete
+spec the model can pattern-match against beats hoping a bigger model infers
+the right default. See `agents/query_agent/prompts/templates.yaml` (T1, T2,
+T4, T10, T11 scaffolds) and [ADR-0004](docs/adr/0004-query-agent-routing-and-retrieval.md).
+
+### Pattern 6: Structured Reasoning Scaffolds
+
+**Heuristic**: give every agent capability an explicit Goal → Sub-goals →
+Constraints → Escalate shape, so hallucination and inconsistency have a named
+place to be caught.
+
+Note on naming: this used to be called "Structured Cognitive Loops" in
+`AGENT_HYPOTHESES.md` (VH2). That name is corrected here - the shape is a
+**fixed structure for one prompt**, applied once, not an iterative loop. A
+real loop (perceive → act → observe → repeat) is a different, separate
+concept; the query agent's actual loops - the cross-turn clarification loop
+and the two in-request self-correction loops - are documented in
+[ADR-0004 D3](docs/adr/0004-query-agent-routing-and-retrieval.md) and
+[ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md), and don't
+share a name with this pattern to avoid exactly this confusion.
+
+**Worked example** - `T9_risk_exposure_review`
+(`agents/query_agent/prompts/templates.yaml`):
+- 🎯 **Goal**: "what should I worry about" - an open-ended risk/exposure question.
+- **Sub-goals**: decompose into concrete probes, one find_contracts + search_clauses
+  pair per named risk topic.
+- 🚧 **Constraints**: "never assert a risk without a cited clause"; the
+  `deduction_procedure` field further constrains *how* a retrieved clause
+  becomes a severity judgment (four named dimensions, `why` must quote the
+  triggering text).
+- 🛑 **Escalate**: `T12_out_of_scope`, or the clarification loop when the
+  question projects onto no template at all.
+
+**Important caveat, found empirically this session - constraints stated
+clearly are necessary but not sufficient on a small model:**
+
+1. The interpret stage's own prompt said, in the same breath, "do not invent
+   terms the evidence does not contain" *and* listed example risk categories
+   ("uncapped liability, penalties") as illustrations of the field's purpose.
+   The model copied the named examples into its output regardless of whether
+   the evidence supported them - not because the constraint was missing, but
+   because of *where* the examples sat relative to it. Removing the concrete
+   examples (keeping only the constraint) fixed this specific failure.
+2. A later, more demanding instruction - "produce exactly ONE `what_matters`
+   point per clause, never one per dimension" - was given to `llama3.2:3b`
+   twice, worded as clearly as it could be, reinforced the second time. The
+   model organised its output by dimension both times anyway. This is
+   evidence that some structural instructions are past what a given model
+   size will reliably execute, no matter how the prompt is worded - not
+   something that gets fixed by rewording a third time.
+
+**Practical implication**: a structured scaffold reduces hallucination but
+cannot be the *only* defence - pair it with an independent check that doesn't
+share the drafting model's blind spots (`_verify` re-reading the draft against
+deterministic data, ADR-0005's bounded self-correction loops as a second
+attempt, and a safe deterministic fallback for when synthesis isn't
+well-evidenced enough to attempt). See
+[ADR-0004](docs/adr/0004-query-agent-routing-and-retrieval.md) and
+[ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md).
+
 ---
 
 ## 5. Implementation Checklist for New MCPs

@@ -31,7 +31,7 @@ def test_extract_then_analyze_threads_the_new_contract_into_the_question() -> No
     os.close(descriptor)
     seen_questions: list[str] = []
 
-    async def fake_analyze(question, organization_id, contract_id, database_path, history):
+    async def fake_analyze(question, organization_id, contract_id, database_path, history, clarify_round=0):
         seen_questions.append(question)
         return {"answer": f"analysis for {contract_id}", "confidence": 0.8, "citations": []}
 
