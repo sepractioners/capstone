@@ -150,24 +150,38 @@ def test_guard_drops_calls_outside_the_named_template_allowlist() -> None:
     assert "rank_evidence" not in phases  # the out-of-allowlist search_clauses was dropped
 
 
-def test_unroutable_question_falls_back_to_the_synthesis_template() -> None:
-    """No template, no calls -> _guard_plan routes to T9 (find_contracts +
-    search_clauses), never a bare count."""
-    draft = QueryAnswer(answer="Key exposures: ...", confidence=0.6, citations=[])
-    calls = AsyncMock(side_effect=[
-        _resp(agent._Plan()),  # planner returned nothing usable
-        _resp(agent._Interpretation()),
-        _resp(draft),
-        _resp(agent._Verification(supported=True, adjusted_confidence=0.6)),
-    ])
+def test_unroutable_question_asks_for_clarification() -> None:
+    """Planner returns nothing usable, and the question has no keyword/filter
+    signal for the deterministic backstop either -> ADR-0004 D3: ask the human,
+    never fabricate a plan. Only the plan LLM call happens - no gather, no
+    interpret, no draft, no verify."""
+    calls = AsyncMock(side_effect=[_resp(agent._Plan())])  # planner returned nothing usable
     with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
-        _run("What are the most significant contractual risks across our portfolio?")
+        result = _run("What are the most significant contractual risks across our portfolio?")
+
+    assert result.needs_clarification is True
+    assert result.uncertain is True
+    assert calls.await_count == 1  # plan only
 
     trace = agent.get_trace()
     resolved = next(s for s in trace if s["phase"] == "plan_resolved")["output"]
-    assert resolved["template"] == agent._FALLBACK_TEMPLATE
-    assert {c["tool"] for c in resolved["calls"]} == {"find_contracts", "search_clauses"}
-    assert not any(s["phase"] == "tool:count_contracts" for s in trace)
+    assert resolved["calls"] == []
+    assert not any(s["phase"].startswith("tool:") for s in trace)
+    assert not any(s["phase"] in ("draft_answer", "verify") for s in trace)
+
+
+def test_clarify_gate_stops_asking_and_returns_a_terminal_answer() -> None:
+    """clarify_round already at the configured max -> a terminal answer, not
+    another question - the loop must terminate."""
+    calls = AsyncMock(side_effect=[_resp(agent._Plan())])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run(
+            "What are the most significant contractual risks across our portfolio?",
+            clarify_round=agent.config.clarify_max_rounds,
+        )
+
+    assert result.needs_clarification is False
+    assert result.answer == agent._TERMINAL_UNROUTED_TEXT
 
 
 # ----------------------------------------------------------- degraded-mode router
@@ -186,14 +200,13 @@ def test_deterministic_route_maps_questions_to_templates() -> None:
         assert [c.tool for c in plan.calls] == tools, question
 
 
-def test_deterministic_route_unknown_question_uses_the_fallback() -> None:
-    plan = agent._guard_plan(
-        "What are the most significant contractual risks across our portfolio?",
-        agent._deterministic_route("What are the most significant contractual risks across our portfolio?", _FACETS),
-        _FACETS,
-    )
-    assert plan.template == agent._FALLBACK_TEMPLATE
-    assert {c.tool for c in plan.calls} == {"find_contracts", "search_clauses"}
+def test_deterministic_route_unknown_question_yields_no_plan() -> None:
+    """No keyword, filter, or clause signal -> an empty plan, not a guess.
+    _plan()/answer() turn this into a clarification, not a fabricated call."""
+    question = "What are the most significant contractual risks across our portfolio?"
+    plan = agent._guard_plan(question, agent._deterministic_route(question, _FACETS), _FACETS)
+    assert plan.template == ""
+    assert plan.calls == []
 
 
 def test_which_contracts_have_clause_enumerates_completely() -> None:

@@ -91,18 +91,27 @@ async def analyze_contracts(request: ContractQueryRequest) -> dict:
     - If retrieved evidence <50% relevant: return "Not covered in contracts"
     - If multiple contradictory clauses found: return all with confidence scores
     - If question requires inference: flag "Not stated; inferred from..."
+    - If the question doesn't project onto any routing template (planner declined
+      AND deterministic keyword/facet routing found nothing): the agent never
+      guesses a plan - it returns `needs_clarification=true` with a targeted
+      question. Pass `clarify_round` = how many consecutive clarification turns
+      this conversation already had; the caller should present the terminal
+      answer itself (not call again) once the agent's QUERY_CLARIFY_MAX_ROUNDS
+      is reached - the agent also gates this itself as a backstop.
 
     SCOPE BOUNDARIES:
     - IN: Terms, obligations, dates, conditions explicitly stated in contract
     - OUT: Industry practices, regulatory requirements, "should be there"
 
-    RETURNS: {question, answer, sources[], grounded, debug_trace}
+    RETURNS: {question, answer, needs_clarification, sources[], grounded, debug_trace}
     """
     contracts = contracts_for_organization(
         get_dependencies(), DEFAULT_DATABASE_PATH, request.organization_id, request.contract_id
     )
     try:
-        result = await answer(request.question, contracts, request.contract_id, request.history)
+        result = await answer(
+            request.question, contracts, request.contract_id, request.history, request.clarify_round
+        )
     except Exception as exc:  # noqa: BLE001 - keep the partial trace on failure
         return {
             "question": request.question,

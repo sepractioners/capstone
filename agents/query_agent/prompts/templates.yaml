@@ -16,7 +16,11 @@
 # no unscoped read. Counts, sums and date math are computed by the tools, never
 # by the model.
 
-fallback: T9_risk_exposure_review   # ambiguous / no clear fit routes here
+# Suggested to the planner for a question with no clear fit - advisory only.
+# Code does NOT auto-expand this: a plan with no calls (planner declined/timed
+# out, or named this with nothing usable, and deterministic routing also found
+# nothing) is never fabricated - the agent asks the human instead (ADR-0004 D3).
+fallback: T9_risk_exposure_review
 
 templates:
 

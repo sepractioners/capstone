@@ -37,6 +37,10 @@ class QueryAgentConfig:
     list_full_max: int = max(1, int(os.environ.get("QUERY_LIST_FULL_MAX", "10")))
     evidence_budget: int = max(4, int(os.environ.get("QUERY_EVIDENCE_BUDGET", "30")))
     search_k: int = max(2, int(os.environ.get("QUERY_SEARCH_K", "8")))
+    # A question that projects onto no template (planner failed/declined, and
+    # deterministic keyword+facet routing found nothing either) gets a
+    # clarification, not a fabricated plan. Bounded so the loop terminates.
+    clarify_max_rounds: int = max(1, int(os.environ.get("QUERY_CLARIFY_MAX_ROUNDS", "3")))
 
 
 config = QueryAgentConfig()

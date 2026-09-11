@@ -35,7 +35,12 @@ clause lookup). The agent branches on the *kinds* of question and resolves each.
    ("signed in 2024", "expiring in 90 days", "over $1M") onto an unscoped call,
    and drops any call outside the template's allowlist. It does **no tool
    selection**. A question that fits no template routes to the
-   `T9_risk_exposure_review` fallback (retrieve + synthesise), never a bare count.
+   `T9_risk_exposure_review` template — but only when the model actually names
+   it with real calls. A question that projects onto **no** template on *either*
+   the LLM planner or the deterministic backstop is never turned into a guessed
+   plan: `answer()` returns `needs_clarification=true` with a targeted question
+   grounded in the portfolio's real facets, bounded by `QUERY_CLARIFY_MAX_ROUNDS`
+   on both the orchestrator and the agent (ADR-0004 D3).
 
    `QUERY_PLAN_TOOLS=0` is a **degraded mode** for the fully-offline reviewer tour
    on a small local model: no LLM planner, deterministic keyword routing to the
@@ -123,6 +128,7 @@ QUERY_LIST_FULL_MAX=10
 QUERY_EVIDENCE_BUDGET=30
 QUERY_SEARCH_K=8
 QUERY_FAST_TIMEOUT_SECONDS=120
+QUERY_CLARIFY_MAX_ROUNDS=3      # bounds the ask-for-clarification loop (ADR-0004 D3)
 ```
 
 Routing and retrieval architecture:

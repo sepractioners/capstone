@@ -93,9 +93,22 @@ MCP server. This ADR settles both.
   template's allowlist. It performs **no tool selection**. The
   `_CLAUSE_RE`/`_COUNT_RE`/`_LIST_RE`/`_MATH_RE` selection branches are removed
   from the shared path.
-- **D3 — Fixed fallback.** A question with no usable plan routes to
-  `T9_risk_exposure_review` (`find_contracts` + `search_clauses`), never to a
-  bare `count_contracts`.
+- **D3 — Bounded clarification loop, never a fabricated plan.** A question with
+  no usable plan - the LLM planner declined/timed out **and** deterministic
+  keyword + facet routing (the backstop) also found nothing to project - is
+  never turned into a guessed plan (not a bare `count_contracts`, not a
+  synthesized search phrase, not a canned probe list). The agent instead returns
+  `needs_clarification=true` with a targeted question grounded in the
+  portfolio's real facets, and relies on the caller to re-ask with the enriched
+  context (the human's answer usually supplies the missing filter/topic, which
+  routes on the next turn). This is bounded on **both** sides:
+  - the orchestrator is the primary owner - it tracks consecutive clarification
+    turns per conversation and stops calling the agent, surfacing a terminal
+    message itself, once `QUERY_CLARIFY_MAX_ROUNDS` is reached;
+  - the agent enforces the same bound itself as a second gate (`clarify_round`
+    passed by the caller, floored by a `history`-derived count when the caller
+    doesn't track it) - so it never asks indefinitely even if the caller ignores
+    the signal.
 - **D4 — `QUERY_PLAN_TOOLS=0` is a labelled degraded mode**, not the default. It
   keeps a minimal keyword router (moved to `_deterministic_route`) that serves
   the deterministic (🟢 **D**) templates; the architecture default is
@@ -153,13 +166,17 @@ MCP server. This ADR settles both.
 
 *Must be resolved (and this section emptied) before Status moves to Accepted.*
 
-1. Does the planner emit `calls` itself, or only name the `template` and let
-   `_guard_plan` expand the template's default calls? (Leaning: planner emits
-   calls, template constrains — keeps one code path.)
+1. ~~Does the planner emit `calls` itself, or only name the `template` and let
+   `_guard_plan` expand the template's default calls?~~ **Resolved:** the
+   planner emits calls itself; `_guard_plan` never expands a template into
+   calls on the model's behalf - a template named with no calls is treated as
+   unrouted (D3).
 2. `expiring_within_days` default for "next quarter" / "soon" — 90 is assumed
    throughout; confirm.
 3. Degraded-mode `_deterministic_route`: keep the current keyword coverage
    (handles 🟢 T1–T5, T10, T11) or narrow it further?
+4. `QUERY_CLARIFY_MAX_ROUNDS` default (currently 3) — confirm against real
+   conversations once the probe/orchestrator can be exercised live.
 
 ## References
 

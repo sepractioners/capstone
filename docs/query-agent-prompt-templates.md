@@ -50,9 +50,15 @@ the answer must say so and offer the exact count or a narrower filter.
 | 🚫 Out-of-scope / advice | T12 `out_of_scope` | — |
 | 🔄 Multi-turn follow-up | *inherits the template the follow-up implies* | — |
 
-**T9 is the fallback.** Any question that fits no template — no clear keyword, an
-open analytical ask like "what should I worry about" — routes to T9: decompose
-into probes, retrieve, synthesise. It never degrades to a bare count.
+**T9 is suggested to the planner** for a question that fits no other template —
+an open analytical ask like "what should I worry about": decompose into probes,
+retrieve, synthesise. It is advisory to the *model*, not a code fallback: if the
+model doesn't route (declines, times out, or names T9 with no calls) **and**
+deterministic keyword/facet routing also finds nothing, the agent does not
+guess a plan on the model's behalf. It asks the human — a targeted question
+grounded in the portfolio's real facets — and tries again once the answer
+enriches the context, bounded by `QUERY_CLARIFY_MAX_ROUNDS` on both the
+orchestrator and the agent. See [ADR-0004 D3](adr/0004-query-agent-routing-and-retrieval.md).
 
 **Degraded mode** (`QUERY_PLAN_TOOLS=0`, no model in the routing loop) routes
 deterministically and serves the 🟢 templates well; 🔵 questions still reach an
