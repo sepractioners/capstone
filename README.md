@@ -186,7 +186,13 @@ Each contract persists: parties (country code + role), 7 clauses with full text 
 
 ### What this validates
 
-The portfolio exercises the query agent's routing (choosing tools + filters) and enumeration. Counts, lists, and breakdowns are **computed by deterministic Python from `clm.sqlite3`** and templated into the answer — no model call, so a wrong number is a code bug, not model variance. The model is only invoked for **clause-synthesis** questions ("summarize our payment obligations"); those need a capable model and are slower on a small local one.
+The portfolio exercises the query agent's complete reasoning pipeline:
+
+1. **Template-driven routing** — the planner correctly names one of 12 prompt templates (T1–T12) based on question cues, and uses only that template's allowed tools
+2. **Deterministic arithmetic** — all counts, sums, aggregations, and date calculations are done by deterministic Python from `clm.sqlite3`, never by the model; a wrong number is a code bug, not model variance
+3. **Clause synthesis and coverage** — for synthesis questions (T6–T9), the agent gathers clause evidence via `search_clauses`, interprets it, detects when it's sampling a larger matched set (partial coverage), and always states that coverage in the answer
+4. **Bounded self-correction** — when a synthesis template's gather returns zero clause text, the agent replans once before falling back to a deterministic answer; when `verify` flags unsupported claims, the agent redrafts once before shipping with a capped confidence
+5. **Enumeration and filtering** — routing, filtering by facet (lifecycle_status, contract_type, party, date range), listing, and counting work across all template types
 
 ### What it does *not* validate
 
