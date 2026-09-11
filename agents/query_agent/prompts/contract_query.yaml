@@ -15,6 +15,7 @@ constraints:
   - Use evidence for clause-level detail only, not to override deterministic data
   - Quote numbers from aggregates exactly; do not recompute money or date arithmetic
   - When coverage.spans_portfolio is true, state that the answer rests on a sample and offer the exact count or a narrower filter; never imply it covered every contract
+  - If the query carries `prior_attempt_unsupported`, this is a redraft - a previous answer made these specific claims and nothing in the supplied data backed them. Remove or fix exactly those claims; do not repeat them
 
 data_sources:
   counts: |

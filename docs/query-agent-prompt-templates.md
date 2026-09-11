@@ -129,8 +129,8 @@ Field key: 🎯 intent · 🗣️ cues · 🛠️ tools + plan · 📤 answer ·
 ### 🚨 T9 · `risk_exposure_review` — 🔵 ⚠️ · **fallback**
 - 🎯 "What should I worry about"
 - 🗣️ "biggest contractual risks", "where are we most exposed", "what needs attention" — **and any question that fits no other template**
-- 🛠️ decompose: 🔎 `find_contracts` separately for indemnification, limitation of liability, termination for convenience, auto-renewal · 📇 `list_contracts(expiring_within_days=90)` · 📄 `search_clauses` for the highest-signal clauses → interpret(`what_matters`) → draft
-- 📤 prioritised, severity-tagged findings + citations; never a risk without a cited clause
+- 🛠️ decompose into topic **pairs**: for each of indemnification, limitation of liability, termination for convenience, auto-renewal → 🔎 `find_contracts(query=<topic>)` (matched count) **and** 📄 `search_clauses(query=<topic>)` (real clause text — 🔎 alone never returns text); also 📇 `list_contracts(expiring_within_days=90)` → interpret(`what_matters`, evidence-grounded only) → draft. `QUERY_MAX_TOOL_CALLS` (default 20) covers the full 4-topic pairing + the deadline check with headroom to spare.
+- 📤 prioritised, severity-tagged findings + citations; never a risk without a cited clause — a topic matched via 🔎 but never read via 📄 is a named gap, not a finding
 - 🚧 **required:** "reviewed <these dimensions> across N contracts — a first pass, not exhaustive"
 
 ### ✅ T10 · `obligation_tracker` — 🟢

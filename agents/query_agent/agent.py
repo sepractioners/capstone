@@ -23,6 +23,16 @@ clarification, bounded by ``config.clarify_max_rounds``.
 ``_verify`` checks it - including that a partial-coverage answer doesn't claim
 completeness.
 
+Two bounded, in-request self-correction loops sit inside this pipeline (not to
+be confused with the cross-turn clarification loop above, which needs a human
+reply on the next turn): if a synthesis-mode template's ``_gather`` comes back
+with zero clause text, ``answer()`` replans once with that gap named
+(``config.gather_replan_max_rounds``); if ``_verify`` flags an unsupported
+claim, ``answer()`` redrafts once with the specific labels named
+(``config.draft_reverify_max_rounds``). Both exhaust to today's existing safe
+behaviour unchanged - never a third attempt, never worse than not looping at
+all.
+
 Every step is recorded to a ``TraceRecorder`` (system prompt, exact context,
 parsed output, reasoning, retrieval detail, timing); ``get_trace()`` returns it
 for the caller to persist. The query agent runs one request per subprocess, so
@@ -157,6 +167,14 @@ _TEMPLATES, _FALLBACK_TEMPLATE = _load_templates()
 _TEMPLATE_TOOLS: dict[str, set[str]] = {
     tid: set(t.get("tools", []) or []) for tid, t in _TEMPLATES.items()
 }
+# Templates whose YAML `mode` includes "S" need real clause text to answer -
+# a plan that never calls search_clauses for one of these has nothing to
+# synthesise from. Used only to decide whether a thin gather() is worth one
+# bounded replan (see _gather_needs_evidence below) - not a tool-selection
+# decision, just reading a property the spec already declares.
+_TEMPLATE_NEEDS_EVIDENCE: set[str] = {
+    tid for tid, t in _TEMPLATES.items() if "S" in (t.get("mode") or "").split()
+}
 
 
 def _plan_prompt() -> str:
@@ -164,8 +182,9 @@ def _plan_prompt() -> str:
     never drift. The model names one template; that fixes its tool allowlist."""
     lines = [
         "Route a contract question. First name the single `template` whose cues best "
-        "fit the question; then emit one tool call per distinct need (1 to 5) using ONLY "
-        f"that template's tools. If nothing fits, use `{_FALLBACK_TEMPLATE}`.",
+        f"fit the question; then emit one tool call per distinct need (1 to "
+        f"{config.max_tool_calls}) using ONLY that template's tools. If nothing fits, "
+        f"use `{_FALLBACK_TEMPLATE}`.",
         "",
         "Every tool call is scoped to the caller's organization. Counts, sums and "
         "date arithmetic are done by the tools - never compute a number or a date yourself.",
@@ -176,6 +195,10 @@ def _plan_prompt() -> str:
         "'vendor agreements') onto every filterable call. Other filters: party, "
         "effective_year, expiring_within_days (90 for 'next quarter' - never compute a "
         "date), min_value / max_value.",
+        "",
+        "If the user message carries `prior_attempt_gap`, this is a replan: your first "
+        "plan for this same question missed something. Fix that specific gap - do not "
+        "just repeat the same calls.",
         "",
         "Templates:",
     ]
@@ -214,13 +237,18 @@ _VERIFY_PROMPT = (
 )
 _INTERPRET_PROMPT = (
     "You are reading tenant-scoped contract evidence to build an explicit model before "
-    "answering. From the evidence only:\n"
+    "answering. Every field below is filled ONLY from the evidence you were given - if the "
+    "evidence array is short or covers only one topic, your output must be short and cover "
+    "only that topic too. An empty list is a correct answer when the evidence supports "
+    "nothing.\n"
     "- obligations: each commitment, the responsible party, the event that triggers it, the "
     "consequence the text attaches to non-performance (empty if unstated), and any deadline.\n"
     "- rights: each right or option a party holds, what triggers it, and its effect.\n"
-    "- what_matters: the few points that most affect risk or money (near deadlines, "
-    "unilateral termination rights, auto-renewal lock-in, uncapped liability, penalties), "
-    "each with a one-line why and a severity.\n"
+    "- what_matters: the points that most affect risk or money - but ONLY ones a specific "
+    "evidence entry actually states. Before adding a point, find the exact evidence entry "
+    "it comes from; if you cannot name one, drop the point. Do not add a point because it is "
+    "a common contract risk in general - severity and category come from what the text says, "
+    "not from your prior knowledge of what contracts like this usually contain.\n"
     "Do not invent terms the evidence does not contain. Return only the schema."
 )
 
@@ -454,16 +482,29 @@ def _guard_plan(question: str, plan: _Plan, facets: dict[str, list[str]]) -> _Pl
     return _Plan(template=plan.template, reasoning=plan.reasoning, calls=kept[: config.max_tool_calls])
 
 
-async def _plan(question: str, history_text: str, facets: dict[str, list[str]], rec: TraceRecorder) -> _Plan:
+async def _plan(
+    question: str,
+    history_text: str,
+    facets: dict[str, list[str]],
+    rec: TraceRecorder,
+    feedback: str = "",
+) -> _Plan:
     """LLM planner first (unless degraded mode); if it produced no usable calls
     - disabled, timed out, or named a template but emitted nothing - try the
     deterministic backstop. Either way this can return an empty plan; that is
-    not an error, it means the question did not project onto any template."""
+    not an error, it means the question did not project onto any template.
+
+    ``feedback``: set only on a bounded replan round (see answer()) - names a
+    gap in the *previous* round's gather result ("you got match counts but no
+    clause text"), never a tool to call. Empty on the first round."""
     guarded = _Plan()
     if config.plan_tools:
+        user: dict[str, Any] = {"question": question, "conversation": history_text, "facets": facets}
+        if feedback:
+            user["prior_attempt_gap"] = feedback
         parsed = await _call(
             _PLAN_PROMPT,
-            {"question": question, "conversation": history_text, "facets": facets},
+            user,
             _Plan,
             rec,
             "plan",
@@ -748,19 +789,26 @@ async def _draft_answer(
     interpretation: _Interpretation | None,
     coverage: dict[str, Any],
     rec: TraceRecorder,
+    feedback: str = "",
 ) -> QueryAnswer:
+    """``feedback``: set only on a bounded redraft round (see answer()) - the
+    specific unsupported claims/labels verify() flagged in the *previous*
+    draft. Empty on the first round."""
+    user: dict[str, Any] = {
+        "question": question,
+        "conversation": history_text,
+        "counts": gathered["counts"],
+        "contract_lists": _trim_lists_for_draft(gathered["lists"]),
+        "aggregates": gathered["aggregates"],
+        "evidence": gathered["snippets"][: config.evidence_budget],
+        "interpretation": _interpretation_view(interpretation),
+        "coverage": coverage,
+    }
+    if feedback:
+        user["prior_attempt_unsupported"] = feedback
     parsed = await _call(
         _system_prompt(),
-        {
-            "question": question,
-            "conversation": history_text,
-            "counts": gathered["counts"],
-            "contract_lists": _trim_lists_for_draft(gathered["lists"]),
-            "aggregates": gathered["aggregates"],
-            "evidence": gathered["snippets"][: config.evidence_budget],
-            "interpretation": _interpretation_view(interpretation),
-            "coverage": coverage,
-        },
+        user,
         QueryAnswer,
         rec,
         "draft_answer",
@@ -777,7 +825,12 @@ async def _verify(
     interpretation: _Interpretation | None,
     coverage: dict[str, Any],
     rec: TraceRecorder,
-) -> QueryAnswer:
+) -> tuple[QueryAnswer, _Verification | None]:
+    """Returns ``(verified_answer, raw_verification)``. The raw ``_Verification``
+    is what answer() checks to decide whether a bounded redraft is worth trying
+    (config.draft_reverify_max_rounds) - the adjusted QueryAnswer alone doesn't
+    expose ``supported`` / ``unsupported_citation_labels``. ``None`` when verify
+    didn't return a usable result (unchanged from before: the draft ships as-is)."""
     cited = [c.model_dump() for c in draft.citations]
     parsed = await _call(
         _VERIFY_PROMPT,
@@ -796,16 +849,17 @@ async def _verify(
         "verify",
     )
     if not isinstance(parsed, _Verification):
-        return draft
+        return draft, None
     unsupported = {label.lower() for label in parsed.unsupported_citation_labels}
     kept = [c for c in draft.citations if c.label.lower() not in unsupported]
-    return draft.model_copy(
+    verified = draft.model_copy(
         update={
             "citations": kept,
             "confidence": round(min(draft.confidence, parsed.adjusted_confidence), 3),
             "uncertain": draft.uncertain or not parsed.supported or (bool(draft.citations) and not kept),
         }
     )
+    return verified, parsed
 
 
 def _merge_evidence(current: list[dict[str, str]], new: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -891,6 +945,39 @@ async def answer(
     embed_cache: dict[str, list[float]] = {}
     gathered = await _gather(question, plan, selected, all_records, embed_cache, rec)
 
+    # Bounded self-correction 1/2: a template whose mode needs real synthesis
+    # (S) but whose gather() came back with zero clause text has nothing to
+    # synthesise from - replan once with that gap named, never more than
+    # config.gather_replan_max_rounds times. Exhausted -> proceed exactly as
+    # before (interpret skips itself, the existing safety net composes a safe,
+    # honest, thinner answer). Never a third, fourth, ... attempt.
+    replan_round = 0
+    while (
+        plan.template in _TEMPLATE_NEEDS_EVIDENCE
+        and not gathered["snippets"]
+        and replan_round < config.gather_replan_max_rounds
+    ):
+        replan_round += 1
+        gap = (
+            f"Your previous plan named template {plan.template} and gathered match "
+            "counts (find_contracts / list_contracts) but zero clause text - no "
+            "search_clauses call returned evidence. This template needs real clause "
+            "text to answer, not only match counts."
+        )
+        plan = await _plan(question, history_text, facets, rec, feedback=gap)
+        rec.record(
+            "plan_resolved",
+            output=plan.model_dump(mode="json"),
+            reasoning=plan.reasoning,
+            note=f"replan round {replan_round}/{config.gather_replan_max_rounds} - "
+            "prior gather had 0 clause snippets for an S-mode template",
+        )
+        if not plan.calls:
+            result = _unrouted_response(facets, history, clarify_round, rec)
+            rec.record("result", output=result.model_dump(mode="json"))
+            return result
+        gathered = await _gather(question, plan, selected, all_records, embed_cache, rec)
+
     scratchpad: dict[str, Any] = {
         "tool_calls": [c.model_dump(exclude_defaults=True) for c in plan.calls],
         "count_results": len(gathered["counts"]),
@@ -913,12 +1000,45 @@ async def answer(
 
     draft = _compose_deterministic(question, gathered, coverage) if config.deterministic_compose else None
     if draft is not None:
+        # Deterministic compose is already grounded 1:1 in tool output - no
+        # redraft loop here, there is no LLM draft to correct.
         rec.record("draft_answer", note="deterministic compose - structural question, no clause evidence",
                    output=draft.model_dump(mode="json"))
+        if config.verify:
+            verified, _verification = await _verify(question, draft, gathered, interpretation, coverage, rec)
+        else:
+            verified = draft
+            rec.record("verify", note="skipped - QUERY_VERIFY=0")
     else:
         draft = await _draft_answer(question, history_text, gathered, interpretation, coverage, rec)
-    verified = await _verify(question, draft, gathered, interpretation, coverage, rec) if config.verify else draft
-    if not config.verify:
-        rec.record("verify", note="skipped - QUERY_VERIFY=0")
+        if not config.verify:
+            verified = draft
+            rec.record("verify", note="skipped - QUERY_VERIFY=0")
+        else:
+            verified, verification = await _verify(question, draft, gathered, interpretation, coverage, rec)
+            # Bounded self-correction 2/2: verify flagged an unsupported claim -
+            # redraft once with the specific labels named, never more than
+            # config.draft_reverify_max_rounds times. Exhausted -> ship the last
+            # draft with the existing confidence-capping unchanged (_verify()
+            # already applies min(draft.confidence, adjusted_confidence) on
+            # every round, including this last one).
+            redraft_round = 0
+            while (
+                verification is not None
+                and (not verification.supported or verification.unsupported_citation_labels)
+                and redraft_round < config.draft_reverify_max_rounds
+            ):
+                redraft_round += 1
+                labels = ", ".join(verification.unsupported_citation_labels) or "the flagged claim(s)"
+                gap = (
+                    "Your previous answer made claims not backed by the supplied data - "
+                    f"unsupported: {labels}. Remove or fix exactly those claims; keep "
+                    "everything else that was already supported."
+                )
+                draft = await _draft_answer(
+                    question, history_text, gathered, interpretation, coverage, rec, feedback=gap
+                )
+                verified, verification = await _verify(question, draft, gathered, interpretation, coverage, rec)
+
     rec.record("result", output=verified.model_dump(mode="json"))
     return verified
