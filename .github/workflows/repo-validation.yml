@@ -275,27 +275,6 @@ jobs:
               body: comment
             });
 
-      - name: Email notification on failure
-        if: failure() && github.event_name == 'push'
-        uses: davismariosi/github-action-send-email@master
-        with:
-          server_address: ${{ secrets.EMAIL_SERVER }}
-          server_port: ${{ secrets.EMAIL_PORT }}
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "❌ Repository Validation Failed - ${{ github.repository }}"
-          to: ${{ secrets.EMAIL_RECIPIENT }}
-          from: GitHub Actions
-          body: |
-            Repository validation failed for commit: ${{ github.sha }}
-
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref }}
-            Commit URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
-            Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            Check the workflow logs for details.
-
       - name: Check if all validations passed
         run: |
           if [ ${{ needs.validate.result }} == 'failure' ]; then
