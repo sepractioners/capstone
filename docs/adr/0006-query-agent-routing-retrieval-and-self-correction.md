@@ -300,7 +300,7 @@ ADR-0004: no, for now).
   reworded and reinforced the second time, and was not followed either time.
   This is treated as real evidence of a capability ceiling for some
   instructions on this model size, not a wording problem to keep iterating
-  on - see `[MCP_HEURISTICS.md](../hypotheses/mcp-heuristics.md)` Pattern 6 for the full write-up. The practical
+  on - see [`MCP_HEURISTICS.md`](../hypotheses/mcp-heuristics.md) Pattern 6 for the full write-up. The practical
   implication: a scaffold's constraints reduce but cannot be the *only*
   defence against a small model's mistakes - pair them with an independent
   check (verify re-reading the draft against deterministic data) and a safe
@@ -369,5 +369,5 @@ ADR-0004: no, for now).
 - [Quick tour](../query-agent-quick-tour.md) - one real question per template,
   run through the production CLI path
 - [Query Agent](../../agents/query_agent/README.md)
-- `[MCP_HEURISTICS.md](../hypotheses/mcp-heuristics.md)` Pattern 6, `[AGENT_HYPOTHESES.md](../hypotheses/agent-hypotheses.md)` H5/VH2 - the
+- [`MCP_HEURISTICS.md`](../hypotheses/mcp-heuristics.md) Pattern 6, [`AGENT_HYPOTHESES.md`](../hypotheses/agent-hypotheses.md) H5/VH2 - the
   structured-reasoning-scaffold findings referenced in Consequences
