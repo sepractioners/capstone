@@ -1,5 +1,9 @@
 name: Repository Validation
 
+# Validates repository structure, documentation, and agent functionality
+# Project uses: Python 3.12+, uv, bun (frontend)
+# Runs on: Ubuntu (Node.js 24)
+
 on:
   push:
     branches:
