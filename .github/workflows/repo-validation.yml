@@ -33,7 +33,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Cache Python packages
-        uses: actions/cache@v4.0.2
+        uses: actions/cache@v4
         with:
           path: .venv
           key: venv-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
