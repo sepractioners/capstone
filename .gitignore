@@ -4,7 +4,6 @@
 .env.*
 .certs/
 .venv/
-.claude/
 
 # Python caches and generated package metadata
 __pycache__/

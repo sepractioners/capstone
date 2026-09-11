@@ -1,0 +1,26 @@
+{
+  "skill_name": "repo-validation",
+  "evals": [
+    {
+      "id": 1,
+      "name": "capstone-project-full-validation",
+      "prompt": "Clone the capstone project repository to a fresh folder and validate all README instructions end-to-end. (1) Run the setup script (setup-windows.ps1, setup-linux.sh, or setup-mac.sh depending on platform). (2) Verify the synthetic portfolio was seeded correctly (40 contracts). (3) Test the query_agent CLI with at least T1 (portfolio census) and T7 (synthesis) scenarios using `bash scripts/agent.sh ask \"question\"`. (4) Verify agent responses have valid JSON schema with answer, citations, confidence, and grounded fields. (5) Generate a detailed validation report with execution results and any failures.",
+      "expected_output": "A markdown validation report showing: (1) successful repository clone, (2) setup script execution status with any errors, (3) database seeding verification (40 contracts with correct counts), (4) query_agent T1 test result (answer='40 contracts total: active 24, approved 15, in_review 1'), (5) T7 synthesis test result (multi-sentence answer with citations), (6) JSON schema validation for all responses, (7) confidence levels for each test, (8) any failures or degraded modes, (9) recommendations for fixes if any issues found",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "readme-structure-and-clarity-check",
+      "prompt": "Validate the main README.md in the capstone project. Check for: (1) completeness of sections (setup, installation, usage), (2) clarity of instructions, (3) any TODOs or placeholder text, (4) whether all prerequisites are documented, (5) if code examples are syntactically correct. Output a focused report on documentation quality without necessarily running commands.",
+      "expected_output": "A report analyzing README structure with pass/fail checks for: section completeness, instruction clarity, prerequisite documentation, example code validity. List any incomplete sections, ambiguous instructions, or missing version requirements.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "agent-functionality-validation",
+      "prompt": "Clone the capstone repository and specifically test the query_agent functionality with multiple T-series scenarios. (1) Set up the environment (clone, venv, dependencies). (2) Test CLI agent with: T1 (\"How many contracts?\"), T2 (\"List active vendor agreements\"), T3 (\"Contracts mentioning liability\"), T7 (\"Payment obligations\"). (3) For each test, verify: JSON schema (answer, citations, confidence, grounded), confidence values (0.8+ for T1-T3, 0.6-0.8 for T7), grounded=true (no hallucination), citations reference valid contracts. (4) Report pass/fail for each test with actual agent responses.",
+      "expected_output": "Agent testing report showing: (1) setup success/failure, (2) T1 test: answer matches expected counts, confidence 0.9+, (3) T2 test: lists contracts correctly, (4) T3 test: accurate clause matching, (5) T7 test: synthesized answer with coverage statement, (6) all responses have valid JSON schema, (7) no hallucinations or grounded=false responses, (8) any timeout/error details, (9) confirmation agents are working per ADR-0006 or identification of gaps",
+      "files": []
+    }
+  ]
+}
