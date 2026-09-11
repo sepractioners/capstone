@@ -8,7 +8,7 @@ that fixes the tool allowlist. `_guard_plan` then does only filter-value hygiene
 call outside the named template's tools. **No tool selection lives in code.**
 
 - Machine copy the planner loads: [`agents/query_agent/prompts/templates.yaml`](../agents/query_agent/prompts/templates.yaml)
-- Decision record: [ADR-0004](adr/0004-query-agent-routing-and-retrieval.md)
+- Decision record: [ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md)
 - Benchmark questions: [`docs/query-agent-benchmark-questions.md`](query-agent-benchmark-questions.md)
 - **Which standing hypothesis each template enforces:** [`agents/query_agent/README.md`](../agents/query_agent/README.md#original-hypothesis--template-mapping)
 
@@ -58,7 +58,7 @@ deterministic keyword/facet routing also finds nothing, the agent does not
 guess a plan on the model's behalf. It asks the human — a targeted question
 grounded in the portfolio's real facets — and tries again once the answer
 enriches the context, bounded by `QUERY_CLARIFY_MAX_ROUNDS` on both the
-orchestrator and the agent. See [ADR-0004 D3](adr/0004-query-agent-routing-and-retrieval.md).
+orchestrator and the agent. See [ADR-0006 D3](adr/0006-query-agent-routing-retrieval-and-self-correction.md).
 
 **Degraded mode** (`QUERY_PLAN_TOOLS=0`, no model in the routing loop) routes
 deterministically and serves the 🟢 templates well; 🔵 questions still reach an

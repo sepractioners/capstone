@@ -67,7 +67,7 @@ Track hypotheses about agent architecture, prompts, and MCP usage. Proven hypoth
 - Query agent: superseded by the prompt-template catalogue - the planner names a
   template (an embedded description = tool allowlist + cues + scaffold) rather
   than picking raw tools. See `agents/query_agent/prompts/templates.yaml` and the
-  hypothesis → template mapping in `agents/query_agent/README.md`. ADR-0004.
+  hypothesis → template mapping in `agents/query_agent/README.md`. ADR-0006.
 - Next step: `platform_testing/probe/query_agent_probe.py` scores the resolved
   plan against `expect_plan` per question - that is the H3 eval suite for the
   query agent.
@@ -180,8 +180,9 @@ for one prompt, not an iterative loop; the name was misleading. See
 [MCP_HEURISTICS.md Pattern 6](MCP_HEURISTICS.md#pattern-6-structured-reasoning-scaffolds)
 for the full correction and the query agent's actual loops - which are a
 separate concept documented in
-[ADR-0004 D3](docs/adr/0004-query-agent-routing-and-retrieval.md) and
-[ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md).)*
+[ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md)
+(the clarification loop is D3; the two in-request self-correction loops are
+D9-D10).)*
 
 **Original Hypothesis**: System prompts with Goal → Sub-goals → Constraints → Conditions prevent hallucination and inconsistency.
 

@@ -1,11 +1,15 @@
 # ADR-0005: Bounded in-request self-correction (replan-on-thin-gather, redraft-on-unsupported)
 
-- **Status:** Proposed
+- **Status:** Rejected
 - **Date:** 2026-09-11
 - **Deciders:** Capstone team
 - **Relates to:** [ADR-0004](0004-query-agent-routing-and-retrieval.md)
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [ADR-0006](0006-query-agent-routing-retrieval-and-self-correction.md)
+
+> **Retired.** Consolidated into [ADR-0006](0006-query-agent-routing-retrieval-and-self-correction.md)
+> along with ADR-0004, with the additional detail live testing surfaced.
+> Kept as-is below for history - not further edited.
 
 ## Context and problem statement
 

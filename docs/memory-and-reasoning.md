@@ -31,8 +31,8 @@ Everything persisted is tenant-scoped.
 | Memory type | Extraction agent | Query agent | Orchestrator |
 |---|---|---|---|
 | **Working / short-term** | Per-document running state `{title, contract_type, parties[], defined_terms{}, last_heading, renewal_terms, termination_terms}` threaded page to page; per-page `reasoning` (logged to the trace, dropped from the candidate). Discarded after ingest. | Scratchpad: the planned tool calls, gathered evidence labels, the interpretation's `what_matters`, and the `coverage` record (matched vs. actually read). Discarded after the response. | `execute_plan` step state - step *i*'s result summary feeds step *i+1*; persisted only as safe events. |
-| **Episodic** | None. The durable technical record is the `extraction_trace` → `extraction_traces` table (admin-only). | None in the agent - it is stateless. It receives a read-only `history` list (role + text only) assembled by the orchestrator; also used to floor the clarification round count (`_history_clarify_floor`) when the caller doesn't track it. | `agent_conversations / messages / runs / run_events` in SQLite, plus a **bounded context window** (recent turns) and a **rolling summary** (`agent_conversations.summary`). Also owns the primary `clarify_round` count across turns (ADR-0004 D3). |
-| **Semantic / long-term** | Hybrid RAG store (SQLite FTS5 + local embeddings) over `rag_knowledge.jsonl` + CUAD examples. Retrieved with the first few pages, not just page one. | For clause questions: in-request embedding ranking over authorized evidence (`query_agent/retrieval.py`), keyword fallback, via the `search_clauses` branch / MCP tool. Portfolio questions bypass this entirely (`count_contracts` / `list_contracts`). Persistent tenant-partitioned clause index is future work (deferred, ADR-0004). | - |
+| **Episodic** | None. The durable technical record is the `extraction_trace` → `extraction_traces` table (admin-only). | None in the agent - it is stateless. It receives a read-only `history` list (role + text only) assembled by the orchestrator; also used to floor the clarification round count (`_history_clarify_floor`) when the caller doesn't track it. | `agent_conversations / messages / runs / run_events` in SQLite, plus a **bounded context window** (recent turns) and a **rolling summary** (`agent_conversations.summary`). Also owns the primary `clarify_round` count across turns (ADR-0006 D3). |
+| **Semantic / long-term** | Hybrid RAG store (SQLite FTS5 + local embeddings) over `rag_knowledge.jsonl` + CUAD examples. Retrieved with the first few pages, not just page one. | For clause questions: in-request embedding ranking over authorized evidence (`query_agent/retrieval.py`), keyword fallback, via the `search_clauses` branch / MCP tool. Portfolio questions bypass this entirely (`count_contracts` / `list_contracts`). Persistent tenant-partitioned clause index is future work (deferred, ADR-0006). | - |
 | **Procedural** | `system_prompt.yaml`, RAG guidance, contract profiles. | `templates.yaml` - the routing spec: one prompt template per question category, each with a tool allowlist, a planning `scaffold`, and (for T6-T9) a `deduction_procedure`. Plus `contract_query.yaml` for the draft/verify steps. | The planner prompt. |
 
 **No cross-document memory in extraction.** `memory` is a local in
@@ -81,7 +81,7 @@ query agent as history.
 
 One question can carry several needs at once - a count, a filtered list, a clause
 lookup. The agent classifies the *kinds* of question and resolves each. Routing
-is **spec-driven** (ADR-0004), not keyword-matched: a catalogue of twelve prompt
+is **spec-driven** (ADR-0006), not keyword-matched: a catalogue of twelve prompt
 templates (`templates.yaml`) is the taxonomy the planner reasons from, not an
 enumeration of literal questions - see
 [`docs/query-agent-prompt-templates.md`](query-agent-prompt-templates.md) for
@@ -105,12 +105,12 @@ for which standing hypothesis each part of a template enforces.
   empty plan is caught downstream rather than prevented upfront - `_guard_plan`
   strips anything outside the named template's allowlist, a deterministic
   backstop is tried if the call fails or names nothing usable, the two
-  ADR-0005 self-correction loops give gather and verify one bounded retry
+  ADR-0006 self-correction loops give gather and verify one bounded retry
   each, and a question that never resolves becomes a clarification, never a
   guess. Trading a more reliable but multi-call planning search for a cheap
   single call plus strong downstream backstops was a deliberate, not-yet-closed
   design trade-off, recorded as
-  [ADR-0004 open question 5](adr/0004-query-agent-routing-and-retrieval.md#open-questions)
+  [ADR-0006 open question 4](adr/0006-query-agent-routing-retrieval-and-self-correction.md#open-questions)
   rather than decided here - see also the "spec-driven vs. still one-shot"
   note below.
   - `count_contracts` / `list_contracts` - exact counts, filtered rosters, whole
@@ -128,7 +128,7 @@ for which standing hypothesis each part of a template enforces.
   `_guard_plan` does **filter-value hygiene only** - facet-spelling
   normalisation and forcing a parsed relative-date/value/facet filter onto an
   unscoped call - plus dropping any call outside the named template's
-  allowlist. **No tool selection lives in code** (ADR-0004 D2); the model
+  allowlist. **No tool selection lives in code** (ADR-0006 D2); the model
   chooses tools by reasoning from the template spec, not a keyword table. If
   the LLM planner is unavailable or names nothing usable, a deterministic
   keyword/facet backstop (`_deterministic_route`) is tried - and is the *only*
@@ -139,10 +139,10 @@ for which standing hypothesis each part of a template enforces.
   phrase): it returns `needs_clarification=true`, a targeted question grounded
   in the portfolio's real facets, bounded by `QUERY_CLARIFY_MAX_ROUNDS` on
   both the orchestrator (primary owner of the round count across turns) and
-  the agent itself as a second gate (ADR-0004 D3).
+  the agent itself as a second gate (ADR-0006 D3).
 - **Gather:** run every call. Portfolio logic (`query_agent/portfolio.py`) is
   shared with the Query MCP `count_contracts` / `list_contracts` tools. **Bounded
-  self-correction 1/2 (ADR-0005):** if the named template's mode needs real
+  self-correction 1/2 (ADR-0006):** if the named template's mode needs real
   synthesis (`S`) but gather came back with zero clause text, replan once with
   that gap named explicitly before falling through - bounded by
   `QUERY_GATHER_REPLAN_MAX_ROUNDS`, 0 disables it.
@@ -169,7 +169,7 @@ for which standing hypothesis each part of a template enforces.
   coverage is partial is rejected. Drops unsupported citations, sets
   `confidence = min(draft.confidence, verify.adjusted_confidence)` - a
   conservative floor, verify can only ever lower trust in an answer, never
-  inflate it. **Bounded self-correction 2/2 (ADR-0005):** if verify flags an
+  inflate it. **Bounded self-correction 2/2 (ADR-0006):** if verify flags an
   unsupported claim, redraft once with the specific labels named before
   shipping - bounded by `QUERY_DRAFT_REVERIFY_MAX_ROUNDS`, 0 disables it; only
   wraps the LLM draft path, not `_compose_deterministic` (already grounded 1:1
@@ -178,7 +178,7 @@ for which standing hypothesis each part of a template enforces.
 Both self-correction loops are **probabilistic improvements, not guarantees**:
 bounded rounds, and on exhaustion, fall through to the pre-loop behaviour
 unchanged - never a fabrication, never an infinite loop, never worse than not
-looping at all. See [ADR-0005](adr/0005-query-agent-self-correction-loops.md).
+looping at all. See [ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md).
 
 **Why not pure retrieval:** "how many active contracts" needs every contract's
 status, and "which contracts require liability insurance" needs every matching
@@ -226,9 +226,9 @@ built.
 | `QUERY_DETERMINISTIC_COMPOSE` | `1` | template structural answers (no clause evidence) from tool output — no LLM draft call |
 | `QUERY_VERIFY` | `1` | post-draft verification pass |
 | `QUERY_FAST_TIMEOUT_SECONDS` | `120` | timeout for the best-effort plan / interpret calls |
-| `QUERY_CLARIFY_MAX_ROUNDS` | `3` | bounds the ask-for-clarification loop when a question projects onto no template (ADR-0004 D3) |
-| `QUERY_GATHER_REPLAN_MAX_ROUNDS` | `1` | bounds the gather-thin replan loop (ADR-0005); `0` disables |
-| `QUERY_DRAFT_REVERIFY_MAX_ROUNDS` | `1` | bounds the unsupported-claim redraft loop (ADR-0005); `0` disables |
+| `QUERY_CLARIFY_MAX_ROUNDS` | `3` | bounds the ask-for-clarification loop when a question projects onto no template (ADR-0006 D3) |
+| `QUERY_GATHER_REPLAN_MAX_ROUNDS` | `1` | bounds the gather-thin replan loop (ADR-0006); `0` disables |
+| `QUERY_DRAFT_REVERIFY_MAX_ROUNDS` | `1` | bounds the unsupported-claim redraft loop (ADR-0006); `0` disables |
 | `PLANNER_MAX_STEPS` | `3` | orchestrator plan length cap |
 | `AGENT_SUMMARY_MIN_TURNS` | `6` | turns before a rolling summary is written |
 

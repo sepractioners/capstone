@@ -2,7 +2,7 @@
 
 Reasoning shape: **plan -> gather -> interpret -> coverage -> draft -> verify.**
 
-Routing is spec-driven (ADR-0004): ``_plan`` has the LLM planner name one
+Routing is spec-driven (ADR-0006): ``_plan`` has the LLM planner name one
 **prompt template** (``prompts/templates.yaml``) per question, which fixes the
 tools it may use; ``_guard_plan`` does filter-value hygiene and allowlist
 enforcement only - no tool selection. If the planner is unavailable or names
@@ -409,11 +409,11 @@ _FILTERABLE_TOOLS = {"count_contracts", "list_contracts", "find_contracts", "agg
 
 def _deterministic_route(question: str, facets: dict[str, list[str]]) -> _Plan:
     """Keyword + facet routing for the deterministic templates - no model. This
-    is the ``QUERY_PLAN_TOOLS=0`` degraded router (ADR-0004 D4) AND the backstop
+    is the ``QUERY_PLAN_TOOLS=0`` degraded router (ADR-0006 D4) AND the backstop
     tried when the LLM planner is unavailable or names no usable calls. A
     question with no keyword, filter, or clause signal returns an *empty* plan -
     ``_plan`` does not invent one; ``answer()`` asks the human instead (bounded
-    clarification loop, ADR-0004 D3).
+    clarification loop, ADR-0006 D3).
     """
     where = _infer_where(question, facets)
 
@@ -464,7 +464,7 @@ def _guard_plan(question: str, plan: _Plan, facets: dict[str, list[str]]) -> _Pl
     template but emitted nothing usable) is returned as-is - empty. Nothing here
     guesses a tool or a search phrase on the caller's behalf; ``_plan`` tries the
     deterministic backstop next, and ``answer()`` asks the human if that is also
-    empty (ADR-0004 D3).
+    empty (ADR-0006 D3).
     """
     where = _infer_where(question, facets)
     allow = _TEMPLATE_TOOLS.get(plan.template)  # None -> unknown / blank template, allow anything
@@ -743,7 +743,7 @@ def _unrouted_response(
     facets: dict[str, list[str]], history: Any, clarify_round: int, rec: TraceRecorder
 ) -> QueryAnswer:
     """Neither the LLM planner nor deterministic routing could project the
-    question onto a template. Never fabricate a plan (ADR-0004 D3): ask the
+    question onto a template. Never fabricate a plan (ADR-0006 D3): ask the
     human, bounded by `clarify_max_rounds` on both the caller-supplied
     `clarify_round` and a history-derived floor (defence in depth if the caller
     doesn't track rounds itself)."""
@@ -909,7 +909,7 @@ async def answer(
     already had on this conversation (0 for a fresh question). The orchestrator
     is the primary owner of this count and should stop calling the agent past
     ``config.clarify_max_rounds``; the agent enforces the same bound itself as a
-    second gate (ADR-0004 D3)."""
+    second gate (ADR-0006 D3)."""
     global _last_trace
     rec = TraceRecorder("query")
     _last_trace = rec.steps

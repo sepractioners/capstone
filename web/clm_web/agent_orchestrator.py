@@ -71,7 +71,7 @@ class AgentOrchestrator:
     def _clarify_round(history: list[dict[str, str]]) -> int:
         """Consecutive trailing assistant turns that read as a clarification
         question - the orchestrator's own count, passed to the query agent so it
-        can stop asking once ``QUERY_CLARIFY_MAX_ROUNDS`` is reached (ADR-0004
+        can stop asking once ``QUERY_CLARIFY_MAX_ROUNDS`` is reached (ADR-0006
         D3; mirrors the agent's own `_history_clarify_floor` backstop)."""
         rounds = 0
         for turn in reversed(history):

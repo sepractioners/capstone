@@ -41,7 +41,7 @@ async def analyze_via_mcp(
 
     ``clarify_round``: consecutive clarification turns this conversation already
     had (0 for a fresh question) - see ``ContractQueryRequest.clarify_round`` /
-    ADR-0004 D3. The caller (the orchestrator) owns tracking this and should stop
+    ADR-0006 D3. The caller (the orchestrator) owns tracking this and should stop
     calling once it reaches the agent's ``QUERY_CLARIFY_MAX_ROUNDS``.
     """
     return await _call_tool(

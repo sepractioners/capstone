@@ -157,7 +157,7 @@ def test_guard_drops_calls_outside_the_named_template_allowlist() -> None:
 
 def test_unroutable_question_asks_for_clarification() -> None:
     """Planner returns nothing usable, and the question has no keyword/filter
-    signal for the deterministic backstop either -> ADR-0004 D3: ask the human,
+    signal for the deterministic backstop either -> ADR-0006 D3: ask the human,
     never fabricate a plan. Only the plan LLM call happens - no gather, no
     interpret, no draft, no verify."""
     calls = AsyncMock(side_effect=[_resp(agent._Plan())])  # planner returned nothing usable

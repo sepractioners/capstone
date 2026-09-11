@@ -620,7 +620,7 @@ real model (`gemma4:latest`) - the resolved plan's own `reasoning` field
 echoed the rule back verbatim. Same principle as CUAD examples: a concrete
 spec the model can pattern-match against beats hoping a bigger model infers
 the right default. See `agents/query_agent/prompts/templates.yaml` (T1, T2,
-T4, T10, T11 scaffolds) and [ADR-0004](docs/adr/0004-query-agent-routing-and-retrieval.md).
+T4, T10, T11 scaffolds) and [ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md).
 
 ### Pattern 6: Structured Reasoning Scaffolds
 
@@ -634,8 +634,8 @@ Note on naming: this used to be called "Structured Cognitive Loops" in
 real loop (perceive → act → observe → repeat) is a different, separate
 concept; the query agent's actual loops - the cross-turn clarification loop
 and the two in-request self-correction loops - are documented in
-[ADR-0004 D3](docs/adr/0004-query-agent-routing-and-retrieval.md) and
-[ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md), and don't
+[ADR-0006 D3](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md) and
+[ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md), and don't
 share a name with this pattern to avoid exactly this confusion.
 
 **Worked example** - `T9_risk_exposure_review`
@@ -671,11 +671,11 @@ clearly are necessary but not sufficient on a small model:**
 **Practical implication**: a structured scaffold reduces hallucination but
 cannot be the *only* defence - pair it with an independent check that doesn't
 share the drafting model's blind spots (`_verify` re-reading the draft against
-deterministic data, ADR-0005's bounded self-correction loops as a second
+deterministic data, ADR-0006's bounded self-correction loops as a second
 attempt, and a safe deterministic fallback for when synthesis isn't
 well-evidenced enough to attempt). See
-[ADR-0004](docs/adr/0004-query-agent-routing-and-retrieval.md) and
-[ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md).
+[ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md) and
+[ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md).
 
 ---
 
