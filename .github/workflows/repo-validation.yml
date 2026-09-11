@@ -113,39 +113,66 @@ jobs:
       - name: Start services
         shell: bash
         continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: |
           source .venv/bin/activate
-          echo "=== Starting services ==="
-          timeout 240 bash scripts/run-all.sh --bootstrap > service.log 2>&1 &
-          SERVICE_PID=$!
-          sleep 15
+          echo "=== Environment ==="
+          pwd
+          ls -la
+          echo "Python: $(python --version)"
+          echo "Node: $(node --version 2>/dev/null || echo 'not installed')"
+          echo "Bun: $(bun --version 2>/dev/null || echo 'not installed')"
 
-          # Check if services are running (API first, then portal)
+          echo "=== Starting services ==="
+          timeout 300 bash scripts/run-all.sh --bootstrap > service.log 2>&1 &
+          SERVICE_PID=$!
+          echo "Service PID: $SERVICE_PID"
+          sleep 20
+
+          # Check database
+          echo "=== Checking database ==="
+          if [ -f clm.sqlite3 ]; then
+            echo "✅ Database exists"
+            ls -lh clm.sqlite3
+          else
+            echo "❌ Database NOT found"
+          fi
+
+          # Check if services are running
           echo "=== Checking service health ==="
           API_READY=0
           WEB_READY=0
 
-          for i in {1..40}; do
+          for i in {1..60}; do
             if [ $API_READY -eq 0 ] && curl -sk https://localhost:8443/docs > /dev/null 2>&1; then
-              echo "✅ API responding"
+              echo "✅ API responding at 8443"
               API_READY=1
             fi
             if [ $WEB_READY -eq 0 ] && curl -sk https://localhost:5173 > /dev/null 2>&1; then
-              echo "✅ Web portal responding"
+              echo "✅ Web portal responding at 5173"
               WEB_READY=1
             fi
             if [ $API_READY -eq 1 ] && [ $WEB_READY -eq 1 ]; then
               echo "✅ All services ready"
               break
             fi
-            echo "Waiting for services... ($i/40)"
-            sleep 3
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "Waiting for services... ($i/60) - Checking processes:"
+              ps aux | grep -E "(python|node|bun|uvicorn)" | grep -v grep || echo "No processes found"
+            fi
+            sleep 2
           done
 
-          if [ $API_READY -eq 0 ]; then
-            echo "⚠️ API not responding, checking logs:"
-            tail -50 service.log
+          echo "=== Service startup complete ==="
+          echo "API ready: $API_READY, Web ready: $WEB_READY"
+
+          if [ $API_READY -eq 0 ] || [ $WEB_READY -eq 0 ]; then
+            echo "❌ Services failed to reach healthy state"
+            echo "=== Full service log ==="
+            cat service.log
+          else
+            echo "✅ Services are healthy"
+            tail -20 service.log
           fi
 
           # Keep service running for tests
