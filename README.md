@@ -77,7 +77,7 @@ Password: CapstoneAdmin!2026
 
 ### 4. Quick tour with the agent CLI
 
-`clm-agent` is an authenticated HTTP/SSE client of the running API — it does **not** call the database or MCP directly, so **the API must be running** (step 2) before any command.
+`clm-agent` is an authenticated HTTP/SSE client of the running API — it authenticates via API first before communicating with MCP server.
 
 **The `scripts/agent` wrapper authenticates for you.** It logs in with the built-in review account above, obtains a bearer token, and runs `clm-agent` — you do not paste a token:
 
