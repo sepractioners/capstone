@@ -138,11 +138,28 @@ jobs:
         timeout-minutes: 2
         run: |
           source .venv/bin/activate
-          echo "=== Testing T1 scenario (Portfolio Census) ==="
-          timeout 60 bash scripts/agent.sh ask "How many contracts do we have, by lifecycle status?" 2>&1 || echo "Agent test timed out or failed"
+          echo "=== Checking for Ollama ==="
+          if command -v ollama &> /dev/null; then
+            echo "✅ Ollama found"
+            ollama --version
 
-          echo "=== Testing T3 scenario (Clause Presence) ==="
-          timeout 60 bash scripts/agent.sh ask "Which contracts mention liability insurance?" 2>&1 || echo "Agent test timed out or failed"
+            echo "=== Checking for gemma4 model ==="
+            if ollama list | grep -q gemma4; then
+              echo "✅ gemma4 model available"
+
+              echo "=== Testing T1 scenario (Portfolio Census) ==="
+              timeout 60 bash scripts/agent.sh ask "How many contracts do we have, by lifecycle status?" 2>&1 || echo "Agent test timed out or failed"
+
+              echo "=== Testing T3 scenario (Clause Presence) ==="
+              timeout 60 bash scripts/agent.sh ask "Which contracts mention liability insurance?" 2>&1 || echo "Agent test timed out or failed"
+            else
+              echo "⚠️ gemma4 model not found"
+              echo "Note: Agent tests require 'ollama pull gemma4:latest'"
+            fi
+          else
+            echo "⚠️ Ollama not installed"
+            echo "Note: Agent tests require Ollama. For CI, configure LLM_PROVIDER=anthropic with API key"
+          fi
 
       - name: Stop services
         shell: bash
