@@ -1,5 +1,4 @@
 # AI-Powered Contract Intelligence
-https://github.com/sepractioners/capstone/wiki/Agentic-System-Concepts-%E2%80%90-Understanding
 
 Upload contracts. Get instant insights.
 
