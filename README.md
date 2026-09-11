@@ -100,6 +100,10 @@ bash scripts/agent.sh chat                                      # interactive
 bash scripts/agent.sh ask "Show the clauses" --contract-id <uuid>
 ```
 
+**One real question per prompt template (T1–T12), with the literal captured
+answer** — run end-to-end through this exact CLI path, not a probe:
+[`docs/query-agent-quick-tour.md`](docs/query-agent-quick-tour.md).
+
 Use a **different account** or a raw `clm-agent` call: pass credentials to the wrapper —
 `bash scripts/agent.sh --email you@org.test --password 'secret' ask "..."` — or get a
 token yourself and export it:
@@ -131,15 +135,17 @@ Without `CLM_AGENT_TOKEN`, `clm-agent` prompts for a bearer token interactively.
 5. Persist via MCP server
 
 **Query workflow (`plan → gather → interpret → coverage → draft → verify`):**
-1. **Plan** — one LLM call names a **prompt template** ([`docs/query-agent-prompt-templates.md`](docs/query-agent-prompt-templates.md)) and emits one tool call per distinct need using only that template's tools. `_guard_plan` does filter-value hygiene only (facet spelling; relative-date / value filters parsed from the text; drop calls outside the allowlist). `QUERY_PLAN_TOOLS=0` is a degraded mode — deterministic keyword routing, no LLM planner. See [ADR-0004](docs/adr/0004-query-agent-routing-and-retrieval.md).
+1. **Plan** — one LLM call names a **prompt template** ([`docs/query-agent-prompt-templates.md`](docs/query-agent-prompt-templates.md)) and emits one tool call per distinct need using only that template's tools. `_guard_plan` does filter-value hygiene only (facet spelling; relative-date / value filters parsed from the text; drop calls outside the allowlist). `QUERY_PLAN_TOOLS=0` is a degraded mode — deterministic keyword routing, no LLM planner. A question that projects onto no template on either path becomes a clarifying question, not a guessed plan, bounded by `QUERY_CLARIFY_MAX_ROUNDS`. See [ADR-0004](docs/adr/0004-query-agent-routing-and-retrieval.md).
 2. **Gather** — run the planned calls:
    - `count_contracts` / `list_contracts` / `aggregate_contracts` — exact counts, lists, and count/sum/avg/min/max of contract value. **All arithmetic happens here; the model never computes numbers.**
    - `find_contracts` — every contract whose clause/obligation text contains a phrase (complete enumeration).
-   - `search_clauses` — embedding-ranked clause snippets, only for one-/few-contract detail questions.
-3. **Interpret** — for clause snippets, build a trigger → consequence → "what matters" view (best-effort).
+   - `search_clauses` — embedding-ranked clause snippets, only for one-/few-contract detail questions or, per a synthesis template, one call per named topic.
+
+   A synthesis-mode template whose gather came back with zero clause text gets one bounded replan with that gap named before falling through to a safe, deterministic answer ([ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md)).
+3. **Interpret** — for clause snippets, build a trigger → consequence → "what matters" view (best-effort), each point grounded in one evidence entry.
 4. **Coverage** — when a synthesis rests on a sample of a larger matched set, the answer must say so and offer the exact count or a narrower filter.
 5. **Draft** — synthesise across counts, lists, and clause evidence with citations, a confidence value, and an uncertainty flag.
-6. **Verify** — counts and lists are authoritative for numbers; clause claims must be backed by cited evidence; an answer implying completeness while coverage is partial is rejected.
+6. **Verify** — counts and lists are authoritative for numbers; clause claims must be backed by cited evidence; an answer implying completeness while coverage is partial is rejected. An unsupported claim gets one bounded redraft before shipping with a capped confidence ([ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md)).
 
 The Query MCP re-checks organization membership on every call. The agent cannot retrieve outside what the MCP returns; a provider failure returns a terminal run failure, not a fabricated answer.
 

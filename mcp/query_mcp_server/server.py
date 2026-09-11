@@ -33,14 +33,19 @@ TOOL ROUTING GUIDE (full taxonomy: docs/query-agent-prompt-templates.md):
 4. find_contracts: EVERY contract whose clause/obligation text contains a phrase -
    "which contracts require liability insurance", "do any have a non-compete".
    Complete enumeration. Use this, NOT search_clauses, for "which contracts...".
-5. search_clauses: ranked clause snippets for one-/few-contract DETAIL - "what
-   does clause X say". Evidence retrieval, not enumeration.
+5. search_clauses: ranked clause snippets - the ONLY tool that returns real
+   clause text. Used for one-/few-contract DETAIL ("what does clause X say")
+   AND, called once per topic, for a portfolio-wide risk/exposure review -
+   find_contracts alone never returns text, only a match count.
 6. aggregate_contracts: count|sum|avg|min|max of contract value, optionally
    grouped. The tool does the arithmetic.
 
 find_contracts vs search_clauses: "which contracts mention X" -> find_contracts
-(scans every contract, exact matched count). "what does X say" -> search_clauses
-(ranked detail, a sample).
+(scans every contract, exact matched count, no text). "what does X say" ->
+search_clauses (ranked detail, a sample, real text). A risk/exposure review
+across several topics needs BOTH per topic - find_contracts to size the
+matched set, search_clauses to read it; a topic checked with find_contracts
+but never passed to search_clauses has no basis for a claim in the answer.
 
 FILTERS: lifecycle_status and contract_type must be a value that exists in this
 organization's portfolio (call count_contracts with no filter to see the
@@ -196,6 +201,10 @@ def search_clauses(organization_id: str, query: str, limit: int = 8) -> list[dic
     - Internal step in query agent's reasoning (retrieves evidence before answering)
     - Direct search for specific clause text: "Find all liability caps"
     - Building fact-checking evidence: "What exactly does the contract say about..."
+    - Portfolio-wide risk/exposure review: call ONCE PER NAMED TOPIC (e.g.
+      "indemnification", "limitation of liability", "termination for
+      convenience", "auto-renewal") - each call only returns text for its own
+      query; a topic never passed here has no clause text anywhere in scope.
 
     PROMPT EXAMPLES:
     1. "Show me renewal clauses"

@@ -5,6 +5,11 @@ All LLM calls are mocked; the deterministic portfolio tools run for real. Tool
 allowlist); `_guard_plan` only does filter-value hygiene + allowlist enforcement
 + the fixed fallback. The degraded router (`_deterministic_route`) is what runs
 when `QUERY_PLAN_TOOLS=0`.
+
+Two bounded in-request self-correction loops sit inside `answer()` (see the
+"replan" and "redraft" tests below) - both default to at most one extra round
+(`config.gather_replan_max_rounds` / `config.draft_reverify_max_rounds`) and
+both exhaust to the pre-loop behaviour unchanged.
 """
 from __future__ import annotations
 
@@ -294,8 +299,81 @@ def test_deterministic_compose_notes_a_capped_list() -> None:
     assert result.uncertain is True
 
 
+# ------------------------------------------------------- self-correction: replan
+def test_replan_recovers_when_gather_is_thin_for_a_synthesis_template() -> None:
+    """T9 (mode S - needs real synthesis) resolves a plan with only
+    find_contracts (no clause text). The bounded replan loop fires once; the
+    second plan names search_clauses too, so interpret/draft/verify all run
+    against real evidence this time."""
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "find_contracts", "query": "payment"}, template="T9_risk_exposure_review")),
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T9_risk_exposure_review")),
+        _resp(agent._Interpretation()),
+        _resp(QueryAnswer(answer="Payment terms vary by contract.", confidence=0.7, citations=[])),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.7)),
+    ])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("What are our biggest risks?")
+
+    assert calls.await_count == 5  # plan, replan, interpret, draft, verify
+    trace = agent.get_trace()
+    resolved = [s for s in trace if s["phase"] == "plan_resolved"]
+    assert len(resolved) == 2
+    assert "replan round 1/1" in resolved[1]["note"]
+    assert any(s["phase"] == "interpret" for s in trace)  # the replan actually got real evidence
+    assert result.answer == "Payment terms vary by contract."
+
+
+def test_replan_exhausted_falls_through_to_deterministic_compose() -> None:
+    """T9 resolves find_contracts-only twice in a row - still no clause text
+    after the one allowed replan round. Exhausts and falls through exactly as
+    it would with no replan loop at all: interpret skips itself, the
+    deterministic composer ships a safe, fully-cited, thinner answer."""
+    cfg = dataclasses.replace(agent.config, deterministic_compose=True)
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "find_contracts", "query": "indemnification"}, template="T9_risk_exposure_review")),
+        _resp(_plan({"tool": "find_contracts", "query": "liability"}, template="T9_risk_exposure_review")),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
+    ])
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("What are our biggest risks?")
+
+    assert calls.await_count == 3  # plan, replan, verify - no interpret call, no LLM draft
+    trace = agent.get_trace()
+    assert [s["phase"] for s in trace].count("plan_resolved") == 2
+    interpret_step = next(s for s in trace if s["phase"] == "interpret")
+    assert "skipped" in interpret_step["note"]
+    draft_step = next(s for s in trace if s["phase"] == "draft_answer")
+    assert "deterministic compose" in draft_step["note"]
+    # the replan *replaces* the plan, not merges with it - gather() only ever
+    # sees the most recent round's calls, so only "liability" (round 2) shows.
+    assert "liability" in result.answer
+
+
+def test_gather_replan_can_be_disabled() -> None:
+    """QUERY_GATHER_REPLAN_MAX_ROUNDS=0 - a thin T9 gather falls straight
+    through with no replan attempt at all, same as the exhausted case but in
+    one fewer LLM call."""
+    cfg = dataclasses.replace(agent.config, gather_replan_max_rounds=0, deterministic_compose=True)
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "find_contracts", "query": "indemnification"}, template="T9_risk_exposure_review")),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
+    ])
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("What are our biggest risks?")
+
+    assert calls.await_count == 2  # plan, verify - no replan
+    assert [s["phase"] for s in agent.get_trace()].count("plan_resolved") == 1
+    assert "indemnification" in result.answer
+
+
 # ------------------------------------------------------------------------- verify
 def test_verify_drops_unsupported_citations_and_lowers_confidence() -> None:
+    """Pinned to no redraft rounds - isolates the confidence-capping /
+    citation-dropping mechanism itself from the redraft-loop tests below."""
+    cfg = dataclasses.replace(agent.config, draft_reverify_max_rounds=0)
     draft = QueryAnswer(
         answer="Payment is annual.", confidence=0.95,
         citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
@@ -306,11 +384,111 @@ def test_verify_drops_unsupported_citations_and_lowers_confidence() -> None:
         _resp(draft),
         _resp(agent._Verification(supported=False, adjusted_confidence=0.2, unsupported_citation_labels=["clause:Payment"])),
     ])
-    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
         result = _run("Is payment annual?")
 
     assert result.citations == []
     assert result.confidence == 0.2 and result.uncertain is True
+
+
+# ------------------------------------------------------- self-correction: redraft
+def test_redraft_recovers_when_verify_flags_unsupported_claims() -> None:
+    """verify() flags the first draft's citation as unsupported - the bounded
+    redraft loop fires once, the second draft is clean, and that is what
+    ships (not the confidence-capped original)."""
+    draft1 = QueryAnswer(
+        answer="Payment is annual.", confidence=0.95,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    draft2 = QueryAnswer(answer="Payment terms are not stated as annual in the evidence.", confidence=0.8, citations=[])
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T6_clause_detail")),
+        _resp(agent._Interpretation()),
+        _resp(draft1),
+        _resp(agent._Verification(supported=False, adjusted_confidence=0.2, unsupported_citation_labels=["clause:Payment"])),
+        _resp(draft2),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.8)),
+    ])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("Is payment annual?")
+
+    assert calls.await_count == 6  # plan, interpret, draft1, verify1, draft2 (redraft), verify2
+    assert result.answer == draft2.answer
+    assert result.confidence == 0.8
+
+
+def test_redraft_exhausted_ships_capped_confidence() -> None:
+    """verify() still flags the redraft (unsupported both rounds) - exhausts
+    after the one allowed round and ships the last draft with the existing
+    confidence cap unchanged. Never a third attempt."""
+    draft1 = QueryAnswer(
+        answer="Payment is annual.", confidence=0.95,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    draft2 = QueryAnswer(
+        answer="Payment is definitely annual, trust me.", confidence=0.9,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T6_clause_detail")),
+        _resp(agent._Interpretation()),
+        _resp(draft1),
+        _resp(agent._Verification(supported=False, adjusted_confidence=0.2, unsupported_citation_labels=["clause:Payment"])),
+        _resp(draft2),
+        _resp(agent._Verification(supported=False, adjusted_confidence=0.15, unsupported_citation_labels=["clause:Payment"])),
+    ])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("Is payment annual?")
+
+    assert calls.await_count == 6  # plan, interpret, draft1, verify1, draft2 (redraft), verify2 - no third attempt
+    assert result.citations == []
+    assert result.confidence == 0.15 and result.uncertain is True
+
+
+def test_draft_reverify_can_be_disabled() -> None:
+    """QUERY_DRAFT_REVERIFY_MAX_ROUNDS=0 - verify flags the draft but ships it
+    with the confidence cap, same as the exhausted case, in one fewer round."""
+    cfg = dataclasses.replace(agent.config, draft_reverify_max_rounds=0)
+    draft = QueryAnswer(
+        answer="Payment is annual.", confidence=0.95,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "search_clauses", "query": "payment"}, template="T6_clause_detail")),
+        _resp(agent._Interpretation()),
+        _resp(draft),
+        _resp(agent._Verification(supported=False, adjusted_confidence=0.2, unsupported_citation_labels=["clause:Payment"])),
+    ])
+    with patch.object(agent, "config", cfg), patch.object(llm_client, "acompletion", new=calls), \
+         patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("Is payment annual?")
+
+    assert calls.await_count == 4  # plan, interpret, draft, verify - no redraft
+    assert result.confidence == 0.2
+
+
+def test_happy_path_never_triggers_either_self_correction_loop() -> None:
+    """Neither loop adds a call when nothing is wrong: gather gets real
+    evidence on the first try and verify is satisfied on the first draft."""
+    draft = QueryAnswer(
+        answer="Customer pays within thirty days.", confidence=0.9,
+        citations=[{"contract_id": "c1", "label": "clause:Payment", "evidence": "..."}],
+    )
+    calls = AsyncMock(side_effect=[
+        _resp(_plan({"tool": "search_clauses", "query": "payment terms"}, template="T6_clause_detail")),
+        _resp(agent._Interpretation()),
+        _resp(draft),
+        _resp(agent._Verification(supported=True, adjusted_confidence=0.9)),
+    ])
+    with patch.object(llm_client, "acompletion", new=calls), patch.object(agent, "rank_with_scores", **_RANK):
+        result = _run("What does the payment clause say?")
+
+    assert calls.await_count == 4  # plan, interpret, draft, verify - no replan, no redraft
+    trace = agent.get_trace()
+    assert [s["phase"] for s in trace].count("plan_resolved") == 1
+    assert [s["phase"] for s in trace].count("draft_answer") == 1
+    assert result.answer == draft.answer
 
 
 def test_verify_can_be_disabled() -> None:

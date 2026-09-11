@@ -30,10 +30,10 @@ Everything persisted is tenant-scoped.
 
 | Memory type | Extraction agent | Query agent | Orchestrator |
 |---|---|---|---|
-| **Working / short-term** | Per-document running state `{title, contract_type, parties[], defined_terms{}, last_heading, renewal_terms, termination_terms}` threaded page to page; per-page `reasoning` (logged to the trace, dropped from the candidate). Discarded after ingest. | Scratchpad: the planned tool calls, gathered evidence labels, and the interpretation's `what_matters`. Discarded after the response. | `execute_plan` step state - step *i*'s result summary feeds step *i+1*; persisted only as safe events. |
-| **Episodic** | None. The durable technical record is the `extraction_trace` → `extraction_traces` table (admin-only). | None in the agent - it is stateless. It receives a read-only `history` list (role + text only) assembled by the orchestrator. | `agent_conversations / messages / runs / run_events` in SQLite, plus a **bounded context window** (recent turns) and a **rolling summary** (`agent_conversations.summary`). |
-| **Semantic / long-term** | Hybrid RAG store (SQLite FTS5 + local embeddings) over `rag_knowledge.jsonl` + CUAD examples. Retrieved with the first few pages, not just page one. | For clause questions: in-request embedding ranking over authorized evidence (`query_agent/retrieval.py`), keyword fallback, via the `search_clauses` branch / MCP tool. Portfolio questions bypass this entirely (`count_contracts` / `list_contracts`). Persistent tenant-partitioned clause index is future work. | - |
-| **Procedural** | `system_prompt.yaml`, RAG guidance, contract profiles. | `contract_query.yaml` + per-step prompts. | The planner prompt. |
+| **Working / short-term** | Per-document running state `{title, contract_type, parties[], defined_terms{}, last_heading, renewal_terms, termination_terms}` threaded page to page; per-page `reasoning` (logged to the trace, dropped from the candidate). Discarded after ingest. | Scratchpad: the planned tool calls, gathered evidence labels, the interpretation's `what_matters`, and the `coverage` record (matched vs. actually read). Discarded after the response. | `execute_plan` step state - step *i*'s result summary feeds step *i+1*; persisted only as safe events. |
+| **Episodic** | None. The durable technical record is the `extraction_trace` → `extraction_traces` table (admin-only). | None in the agent - it is stateless. It receives a read-only `history` list (role + text only) assembled by the orchestrator; also used to floor the clarification round count (`_history_clarify_floor`) when the caller doesn't track it. | `agent_conversations / messages / runs / run_events` in SQLite, plus a **bounded context window** (recent turns) and a **rolling summary** (`agent_conversations.summary`). Also owns the primary `clarify_round` count across turns (ADR-0004 D3). |
+| **Semantic / long-term** | Hybrid RAG store (SQLite FTS5 + local embeddings) over `rag_knowledge.jsonl` + CUAD examples. Retrieved with the first few pages, not just page one. | For clause questions: in-request embedding ranking over authorized evidence (`query_agent/retrieval.py`), keyword fallback, via the `search_clauses` branch / MCP tool. Portfolio questions bypass this entirely (`count_contracts` / `list_contracts`). Persistent tenant-partitioned clause index is future work (deferred, ADR-0004). | - |
+| **Procedural** | `system_prompt.yaml`, RAG guidance, contract profiles. | `templates.yaml` - the routing spec: one prompt template per question category, each with a tool allowlist, a planning `scaffold`, and (for T6-T9) a `deduction_procedure`. Plus `contract_query.yaml` for the draft/verify steps. | The planner prompt. |
 
 **No cross-document memory in extraction.** `memory` is a local in
 `extract_node` for one graph invocation. It is never shared between documents,
@@ -77,15 +77,42 @@ query agent as history.
   deterministic date/money helpers back the query agent's portfolio tools, so
   both agents agree on what "$1.5M" or "expiring within 90 days" means.
 
-### Query agent - plan (tree of thought) → gather → interpret → draft → verify
+### Query agent - plan → gather → interpret → coverage → draft → verify
 
 One question can carry several needs at once - a count, a filtered list, a clause
-lookup. The agent classifies the *kinds* of question and resolves each.
+lookup. The agent classifies the *kinds* of question and resolves each. Routing
+is **spec-driven** (ADR-0004), not keyword-matched: a catalogue of twelve prompt
+templates (`templates.yaml`) is the taxonomy the planner reasons from, not an
+enumeration of literal questions - see
+[`docs/query-agent-prompt-templates.md`](query-agent-prompt-templates.md) for
+the full catalogue and [`agents/query_agent/README.md`](../agents/query_agent/README.md#original-hypothesis--template-mapping)
+for which standing hypothesis each part of a template enforces.
 
-- **Plan (`plan` trace stage):** one LLM call branches on question type and emits
-  one tool call per need (≤ `QUERY_MAX_TOOL_CALLS`), each with an optional `where`
-  filter (`lifecycle_status`, `contract_type`, `party`, `effective_year`,
-  `expiring_within_days`, `min_value` / `max_value`):
+- **Plan (`plan` trace stage):** one LLM call names the single **template**
+  whose cues best fit the question - that fixes its tool allowlist - then emits
+  one tool call per need (≤ `QUERY_MAX_TOOL_CALLS`).
+
+  **Why one call, not several candidates evaluated against each other:** the
+  template catalogue is handed to the model *in full* in this one call - all
+  twelve templates' cues and scaffolds at once - so the model is already
+  choosing among explicitly presented alternatives inside a single
+  generation, not picking the first idea that comes to mind. That is weaker
+  than true multi-candidate search (generate N plans, score each, keep the
+  best) - there is no comparative-evaluation step here, and a single greedy
+  generation can and does pick differently across repeated runs of the same
+  question (observed directly this session). The design leans on this single
+  call being *cheap to get wrong* instead of *hard to get wrong*: a bad or
+  empty plan is caught downstream rather than prevented upfront - `_guard_plan`
+  strips anything outside the named template's allowlist, a deterministic
+  backstop is tried if the call fails or names nothing usable, the two
+  ADR-0005 self-correction loops give gather and verify one bounded retry
+  each, and a question that never resolves becomes a clarification, never a
+  guess. Trading a more reliable but multi-call planning search for a cheap
+  single call plus strong downstream backstops was a deliberate, not-yet-closed
+  design trade-off, recorded as
+  [ADR-0004 open question 5](adr/0004-query-agent-routing-and-retrieval.md#open-questions)
+  rather than decided here - see also the "spec-driven vs. still one-shot"
+  note below.
   - `count_contracts` / `list_contracts` - exact counts, filtered rosters, whole
     contract records.
   - `find_contracts` - every contract whose clause text contains a phrase
@@ -95,30 +122,79 @@ lookup. The agent classifies the *kinds* of question and resolves each.
     contract value over a filter, optionally grouped. The tool does the money and
     calendar arithmetic; the model never computes.
   - `search_clauses` - embedding-ranked snippets, for one-/few-contract clause
-    detail only.
+    detail or, per T7-T9's templates, one call per named topic in a portfolio
+    synthesis.
 
-  The first four are deterministic (no LLM, no retrieval). Keyword guards add the
-  tool the planner missed - including relative-date and value filters parsed from
-  the question. Disable the plan call with `QUERY_PLAN_TOOLS=0`.
+  `_guard_plan` does **filter-value hygiene only** - facet-spelling
+  normalisation and forcing a parsed relative-date/value/facet filter onto an
+  unscoped call - plus dropping any call outside the named template's
+  allowlist. **No tool selection lives in code** (ADR-0004 D2); the model
+  chooses tools by reasoning from the template spec, not a keyword table. If
+  the LLM planner is unavailable or names nothing usable, a deterministic
+  keyword/facet backstop (`_deterministic_route`) is tried - and is the *only*
+  router when `QUERY_PLAN_TOOLS=0` (a labelled degraded mode for the
+  fully-offline small-model tour, D-mode templates only). If **neither** the
+  planner nor the backstop projects the question onto a template, the agent
+  does not fabricate a plan (not a bare count, not a synthesized search
+  phrase): it returns `needs_clarification=true`, a targeted question grounded
+  in the portfolio's real facets, bounded by `QUERY_CLARIFY_MAX_ROUNDS` on
+  both the orchestrator (primary owner of the round count across turns) and
+  the agent itself as a second gate (ADR-0004 D3).
 - **Gather:** run every call. Portfolio logic (`query_agent/portfolio.py`) is
-  shared with the Query MCP `count_contracts` / `list_contracts` tools.
+  shared with the Query MCP `count_contracts` / `list_contracts` tools. **Bounded
+  self-correction 1/2 (ADR-0005):** if the named template's mode needs real
+  synthesis (`S`) but gather came back with zero clause text, replan once with
+  that gap named explicitly before falling through - bounded by
+  `QUERY_GATHER_REPLAN_MAX_ROUNDS`, 0 disables it.
 - **Interpret (`interpret` trace stage):** only when clause snippets were
-  gathered - build the trigger → consequence → `what_matters` chain. Best-effort;
-  disable with `QUERY_INTERPRET=0`.
+  gathered - build the trigger → consequence → `what_matters` chain, each point
+  grounded in one specific evidence entry (empty evidence → empty output, never
+  filled from the model's own prior knowledge of what this kind of clause
+  usually contains). Best-effort; disable with `QUERY_INTERPRET=0`.
+- **Coverage:** `matched` vs. what the model actually read
+  (`evidence_fed`/`spans_portfolio`). Not a model call - pure arithmetic on
+  numbers `gather` already produced, so `verify` has an objective fact to check
+  `draft`'s wording against rather than trusting the drafter's own account of
+  its thoroughness.
 - **Draft:** synthesise one answer across counts, lists, and clause evidence.
   When no clause snippets were gathered (a structural question - count / filtered
   count / list / breakdown / enumerate / aggregate) `_compose_deterministic`
   templates the answer + citations straight from the tool output with **no LLM
   call**; the LLM draft runs only for clause synthesis. Disable with
-  `QUERY_DETERMINISTIC_COMPOSE=0`.
+  `QUERY_DETERMINISTIC_COMPOSE=0`. When `coverage.spans_portfolio` is true the
+  draft must say the answer rests on a sample and offer the exact count or a
+  narrower filter - never imply it covered every contract.
 - **Verify:** `counts` / `contract_lists` are authoritative for numbers; clause
-  claims must be backed by cited evidence. Drops unsupported citations, sets a
-  calibrated confidence / the `uncertain` flag.
+  claims must be backed by cited evidence; an answer implying completeness while
+  coverage is partial is rejected. Drops unsupported citations, sets
+  `confidence = min(draft.confidence, verify.adjusted_confidence)` - a
+  conservative floor, verify can only ever lower trust in an answer, never
+  inflate it. **Bounded self-correction 2/2 (ADR-0005):** if verify flags an
+  unsupported claim, redraft once with the specific labels named before
+  shipping - bounded by `QUERY_DRAFT_REVERIFY_MAX_ROUNDS`, 0 disables it; only
+  wraps the LLM draft path, not `_compose_deterministic` (already grounded 1:1
+  in tool output).
+
+Both self-correction loops are **probabilistic improvements, not guarantees**:
+bounded rounds, and on exhaustion, fall through to the pre-loop behaviour
+unchanged - never a fabrication, never an infinite loop, never worse than not
+looping at all. See [ADR-0005](adr/0005-query-agent-self-correction-loops.md).
 
 **Why not pure retrieval:** "how many active contracts" needs every contract's
 status, and "which contracts require liability insurance" needs every matching
 contract - not the top-`QUERY_SEARCH_K` snippets. Counting and enumeration are
 deterministic scans; retrieval only ranks clause text for detail questions.
+
+**What's spec-driven vs. what's still one-shot.** The *routing* decision (which
+template, which tools) is spec-driven per question - the model reasons from the
+template catalogue fresh each call, not from a fixed branch table. But within
+one call, planning and drafting are still single-shot generation, not a
+generate-then-evaluate search over multiple candidates (no tree-of-thought
+branching at either the template-selection or the tool-call-plan level) - the
+`draft` → `verify` split is the one place this pipeline already separates
+generation from evaluation into two independent calls; extending that same
+separation earlier in the pipeline is a considered future direction, not yet
+built.
 
 ### Orchestrator - plan-and-execute
 
@@ -141,8 +217,8 @@ deterministic scans; retrieval only ranks clause text for detail questions.
 | `EXTRACTION_REVIEW_TEXT_CHARS` | `16000` | full-text budget sent to review |
 | `EXTRACTION_PAGE_TAIL_CHARS` | `400` | previous-page continuity tail |
 | `EXTRACTION_RAG_SAMPLE_PAGES` | `3` | pages joined for the RAG query |
-| `QUERY_PLAN_TOOLS` | `1` | LLM plan step (off = the keyword-routed default plan runs) |
-| `QUERY_MAX_TOOL_CALLS` | `5` | tool calls per question |
+| `QUERY_PLAN_TOOLS` | `1` | LLM planner names a template + tool calls (off = degraded mode: deterministic keyword/facet routing, D-mode templates only) |
+| `QUERY_MAX_TOOL_CALLS` | `20` | tool calls per question (T9's full decompose-per-topic recipe needs headroom - 5 silently starved it to one real evidence call) |
 | `QUERY_LIST_FULL_MAX` | `10` | contracts returned as full records before summary fallback |
 | `QUERY_EVIDENCE_BUDGET` | `30` | clause snippets sent to the answer step |
 | `QUERY_SEARCH_K` | `8` | records pulled per search |
@@ -150,6 +226,9 @@ deterministic scans; retrieval only ranks clause text for detail questions.
 | `QUERY_DETERMINISTIC_COMPOSE` | `1` | template structural answers (no clause evidence) from tool output — no LLM draft call |
 | `QUERY_VERIFY` | `1` | post-draft verification pass |
 | `QUERY_FAST_TIMEOUT_SECONDS` | `120` | timeout for the best-effort plan / interpret calls |
+| `QUERY_CLARIFY_MAX_ROUNDS` | `3` | bounds the ask-for-clarification loop when a question projects onto no template (ADR-0004 D3) |
+| `QUERY_GATHER_REPLAN_MAX_ROUNDS` | `1` | bounds the gather-thin replan loop (ADR-0005); `0` disables |
+| `QUERY_DRAFT_REVERIFY_MAX_ROUNDS` | `1` | bounds the unsupported-claim redraft loop (ADR-0005); `0` disables |
 | `PLANNER_MAX_STEPS` | `3` | orchestrator plan length cap |
 | `AGENT_SUMMARY_MIN_TURNS` | `6` | turns before a rolling summary is written |
 

@@ -148,19 +148,40 @@ MCP server. This ADR settles both.
 - The template catalogue is a maintained artifact: a new question class means a
   new template in two places (YAML + doc) kept in sync.
 - `QUERY_PLAN_TOOLS=1` puts an LLM planner call on the critical path; on
-  `llama3.2:3b` that call is slow and can time out. The degraded mode remains the
-  fallback for the offline tour, with weaker template choice for ambiguous
-  questions.
+  `llama3.2:3b` that call runs 90–450s and can time out. The degraded mode
+  remains the fallback for the offline tour, with weaker template choice for
+  ambiguous questions. A LAN host running a bigger model (`gemma4:latest`) cut
+  this to ~10–25s per call in testing - not a fix, a mitigation available when
+  one is reachable.
 - Re-embedding per request is unaddressed until a probe baseline shows it matters.
 
 ### Follow-up work
 
-- Wire `templates.yaml` into `_PLAN_PROMPT`; rewrite `_guard_plan` per D2–D3.
-- Rebuild the query MCP server `instructions` + tool docstrings from the catalogue.
-- Fix the 9 `test_query_agent.py` failures; add `expect_template` + allowlist
-  assertions.
-- Implement the `coverage` record and the `_verify` completeness check.
-- Commit a fresh probe baseline once `QUERY_PLAN_TOOLS=1` is the default.
+Status as of the live-testing pass that closed most of this out:
+
+- ~~Wire `templates.yaml` into `_PLAN_PROMPT`; rewrite `_guard_plan` per
+  D2–D3.~~ **Done.**
+- ~~Rebuild the query MCP server `instructions` + tool docstrings from the
+  catalogue.~~ **Done.**
+- ~~Fix the 9 `test_query_agent.py` failures; add `expect_template` +
+  allowlist assertions.~~ **Done** - rewritten, 22 query-agent-specific tests,
+  full sweep 112/112 (`agents/ mcp/ web/ platform_testing/`).
+- ~~Implement the `coverage` record and the `_verify` completeness check.~~
+  **Done.**
+- Commit a fresh probe baseline once `QUERY_PLAN_TOOLS=1` is the default -
+  **superseded, not done as originally scoped.** Instead of a probe-only
+  baseline, validated live through the actual production path
+  (`clm-agent` CLI → API → orchestrator → MCP → agent) against a real model:
+  one question per template, T1–T12, captured in
+  [`docs/query-agent-quick-tour.md`](../query-agent-quick-tour.md) with 4
+  open findings still flagged there (not blocking, not silently dropped).
+  A `platform_testing/probe` baseline specifically is still worth committing
+  separately if the structured `expect_plan` scoring is wanted alongside the
+  narrative quick-tour record.
+- **New this pass, not originally scoped:** two bounded in-request
+  self-correction loops (gather→replan, verify→redraft) - see
+  [ADR-0005](0005-query-agent-self-correction-loops.md), which this ADR's D1–D8
+  remain the foundation for.
 
 ## Open questions
 
@@ -177,6 +198,18 @@ MCP server. This ADR settles both.
    (handles 🟢 T1–T5, T10, T11) or narrow it further?
 4. `QUERY_CLARIFY_MAX_ROUNDS` default (currently 3) — confirm against real
    conversations once the probe/orchestrator can be exercised live.
+5. `_plan()` is one greedy LLM call over the full template catalogue, not a
+   multi-candidate search (generate several candidate templates/plans, score
+   each, converge). Discussed at design-review depth and validated as sound —
+   it would be a direct extension of the generate/evaluate split this ADR
+   already uses once, at the very end (draft → verify), applied earlier in the
+   pipeline instead of only there. Not built: cost on the evaluation model
+   (each call has run 90–450s locally on `llama3.2:3b`, ~10–25s on the remote
+   `gemma4:latest`) makes this a real trade-off decision, not a default to
+   apply without deciding it deliberately. Revisit alongside ADR-0005's
+   self-correction loops, which partially cover the same failure mode (a bad
+   single-shot plan) with a cheaper, narrower bounded-retry mechanism instead
+   of upfront multi-candidate evaluation.
 
 ## References
 
