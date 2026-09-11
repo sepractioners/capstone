@@ -94,24 +94,40 @@ jobs:
       - name: Start services
         shell: bash
         continue-on-error: true
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           source .venv/bin/activate
           echo "=== Starting services ==="
-          timeout 120 bash scripts/run-all.sh --bootstrap > service.log 2>&1 &
+          timeout 240 bash scripts/run-all.sh --bootstrap > service.log 2>&1 &
           SERVICE_PID=$!
-          sleep 10
+          sleep 15
 
-          # Check if services are running
+          # Check if services are running (API first, then portal)
           echo "=== Checking service health ==="
-          for i in {1..20}; do
-            if curl -sk https://localhost:5173 > /dev/null 2>&1; then
+          API_READY=0
+          WEB_READY=0
+
+          for i in {1..40}; do
+            if [ $API_READY -eq 0 ] && curl -sk https://localhost:8443/docs > /dev/null 2>&1; then
+              echo "✅ API responding"
+              API_READY=1
+            fi
+            if [ $WEB_READY -eq 0 ] && curl -sk https://localhost:5173 > /dev/null 2>&1; then
               echo "✅ Web portal responding"
+              WEB_READY=1
+            fi
+            if [ $API_READY -eq 1 ] && [ $WEB_READY -eq 1 ]; then
+              echo "✅ All services ready"
               break
             fi
-            echo "Waiting for services... ($i/20)"
+            echo "Waiting for services... ($i/40)"
             sleep 3
           done
+
+          if [ $API_READY -eq 0 ]; then
+            echo "⚠️ API not responding, checking logs:"
+            tail -50 service.log
+          fi
 
           # Keep service running for tests
           echo "SERVICE_PID=$SERVICE_PID" >> $GITHUB_ENV
