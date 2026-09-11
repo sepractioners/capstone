@@ -92,15 +92,54 @@ jobs:
             echo "No agent tests found"
           fi
 
-      - name: Test query agent CLI (if venv setup succeeded)
+      - name: Start services
         shell: bash
         continue-on-error: true
+        timeout-minutes: 3
         run: |
-          if [ -f .venv/bin/activate ]; then
-            source .venv/bin/activate
-            echo "=== Testing T1 scenario (Portfolio Census) ==="
-            timeout 60 bash scripts/agent.sh ask "How many contracts do we have, by lifecycle status?" 2>&1 || echo "Agent test timed out or failed"
+          source .venv/bin/activate
+          echo "=== Starting services ==="
+          timeout 120 bash scripts/run-all.sh --bootstrap > service.log 2>&1 &
+          SERVICE_PID=$!
+          sleep 10
+
+          # Check if services are running
+          echo "=== Checking service health ==="
+          for i in {1..20}; do
+            if curl -sk https://localhost:5173 > /dev/null 2>&1; then
+              echo "✅ Web portal responding"
+              break
+            fi
+            echo "Waiting for services... ($i/20)"
+            sleep 3
+          done
+
+          # Keep service running for tests
+          echo "SERVICE_PID=$SERVICE_PID" >> $GITHUB_ENV
+
+      - name: Test query agent CLI (Agent functionality)
+        shell: bash
+        continue-on-error: true
+        timeout-minutes: 2
+        run: |
+          source .venv/bin/activate
+          echo "=== Testing T1 scenario (Portfolio Census) ==="
+          timeout 60 bash scripts/agent.sh ask "How many contracts do we have, by lifecycle status?" 2>&1 || echo "Agent test timed out or failed"
+
+          echo "=== Testing T3 scenario (Clause Presence) ==="
+          timeout 60 bash scripts/agent.sh ask "Which contracts mention liability insurance?" 2>&1 || echo "Agent test timed out or failed"
+
+      - name: Stop services
+        shell: bash
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "=== Stopping services ==="
+          if [ -n "$SERVICE_PID" ]; then
+            kill $SERVICE_PID 2>/dev/null || true
           fi
+          bash scripts/run-all.sh --stop 2>/dev/null || true
+          sleep 2
 
       - name: Check documentation links
         shell: bash
