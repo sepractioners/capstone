@@ -194,12 +194,12 @@ The portfolio exercises the query agent's complete reasoning pipeline:
 4. **Bounded self-correction** — when a synthesis template's gather returns zero clause text, the agent replans once before falling back to a deterministic answer; when `verify` flags unsupported claims, the agent redrafts once before shipping with a capped confidence
 5. **Enumeration and filtering** — routing, filtering by facet (lifecycle_status, contract_type, party, date range), listing, and counting work across all template types
 
-### What it does *not* validate
+### Dataset limitations (not agent limitations)
 
-- **Real drafting variation.** Clauses come from a fixed template pool, so `find_contracts` (literal phrase match) and `search_clauses` (embeddings) are not stressed the way real contract language would.
-- **Extraction accuracy.** These contracts are generated already-structured; no PDF is parsed. Extraction is validated separately — `uv run python -m platform_testing.extraction_eval`.
-- **Value / effective-date questions.** The current seed path persists expiration dates and clause/obligation text but **not** `contract_value`, `effective_date`, or `execution_date` (dropped in the `seed_contracts.py` → `ingest_contract` mapping — a known gap). So `aggregate_contracts` sum/avg and "signed in 2024" filters return empty on this portfolio.
-- **Messy entity resolution, multi-currency aggregation, jurisdiction nuance.** The generator is tidy by construction.
+- **Real drafting variation.** The synthetic clauses come from a fixed template pool with standardized phrasing. Real contracts use varied language for the same concepts (synonyms, different structures, informal language). This means `find_contracts` (literal phrase match) and `search_clauses` (embeddings) aren't stress-tested against real-world linguistic diversity, though the agent and tools themselves work correctly.
+- **Extraction accuracy.** These contracts are generated already-structured; no PDF is parsed. The extraction agent is validated separately — `uv run python -m platform_testing.extraction_eval`.
+- **Value / effective-date questions.** The synthetic data generator doesn't persist `contract_value`, `effective_date`, or `execution_date` (dropped in the `seed_contracts.py` → `ingest_contract` mapping — a known gap). So the query agent can't test `aggregate_contracts` sum/avg or "signed in 2024" filters on this portfolio, though the agent and tools support them.
+- **Messy entity resolution, multi-currency aggregation, jurisdiction nuance.** The synthetic generator is tidy by construction — all party names resolve cleanly, all amounts are in the same currency, all jurisdictions are uniform. These challenges in real data aren't tested here.
 
 For depth on those, the CUAD dataset (opt-in) provides real contracts. The dataset strategy — offline-first defaults, a single contract-type catalog, a real-contract stress corpus, and the CC-BY licensing behind it — is written up in the ADRs under `docs/adr/` (proposed).
 
