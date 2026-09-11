@@ -18,6 +18,14 @@ Cross-module documentation belongs here. Module-specific documentation remains b
   - [ADR-0001](adr/0001-offline-first-contract-data-and-type-catalog.md) (Proposed) - Offline-first contract data and a single contract-type catalog
   - [ADR-0002](adr/0002-query-agent-evaluation-substrate.md) (Proposed) - Bounded evaluation substrate for the query agent
   - [ADR-0003](adr/0003-query-agent-stress-corpus.md) (Proposed) - Pre-built stress corpus for query-agent validation
+  - [ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md) (Proposed) - Query-agent routing, retrieval, and bounded self-correction - consolidates ADR-0004 and ADR-0005 (both retired, kept for history)
+
+## Query Agent — Routing, Templates, and Validation
+
+- [Prompt Templates](query-agent-prompt-templates.md) - The T1-T12 routing spec each question is matched against
+- [Quick Tour](query-agent-quick-tour.md) - One real question per template, run end-to-end through the production CLI, with the literal captured answer
+- [Benchmark](query-agent-benchmark.md) · [Benchmark Questions](query-agent-benchmark-questions.md) - The committed question set, expected answers, and scoring
+- [Small-Model Analysis](query-agent-small-model-analysis.md) *(historical, superseded by ADR-0006)*
 
 ## Domain and Implementation
 

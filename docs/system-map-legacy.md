@@ -5,7 +5,10 @@
 [README Component Architecture](../README.md#-component-architecture).** Kept only
 to show how the two views were once combined. Some labels below (e.g. the query
 agent as "decompose → ReAct") are from that earlier design and no longer match
-the code — the current flow is `plan → gather → interpret → draft → verify`.
+the code — the current flow is
+`plan → gather → interpret → coverage → draft → verify`, with a bounded
+clarification loop and two bounded self-correction loops on top - see
+[ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md).
 
 ## Original Combined System Map
 

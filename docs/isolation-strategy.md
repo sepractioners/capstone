@@ -83,7 +83,7 @@ Portal / CLI ──HTTP──> Orchestrator ──stdio MCP──> Query MCP ser
                                                       │ contract_tenants check
                                                       ▼
                                          Query Agent (in-process): answer()
-                                         plan → gather → interpret → draft → verify
+                                         plan → gather → interpret → coverage → draft → verify
                                                       │ portfolio.py (direct SQL)
                                                       ▼
                                          reads only authorized tenant contracts
