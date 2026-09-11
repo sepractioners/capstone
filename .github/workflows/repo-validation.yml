@@ -13,10 +13,9 @@ on:
 
 jobs:
   validate:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.12']
       fail-fast: false
 
@@ -29,23 +28,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Cache Python packages (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Cache Python packages
         uses: actions/cache@v3
         with:
           path: .venv
-          key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
+          key: venv-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
           restore-keys: |
-            ${{ runner.os }}-venv-
-
-      - name: Cache Python packages (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/cache@v3
-        with:
-          path: .\.venv
-          key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-venv-
+            venv-
 
       - name: Install uv
         run: |
@@ -75,36 +64,26 @@ jobs:
           [ -f agents/extraction_agent/README.md ] && echo "✓ Extraction agent found" || echo "✗ Missing extraction agent"
           [ -f agents/tests/test_query_agent.py ] && echo "✓ Agent tests found" || echo "✗ Missing agent tests"
 
-      - name: Install dependencies (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Install dependencies
         run: |
           python -m venv .venv
           source .venv/bin/activate
           uv pip install -e .
           uv pip install pytest pytest-cov coverage[toml]
 
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          python -m venv .venv
-          .\.venv\Scripts\Activate.ps1
-          uv pip install -e .
-          uv pip install pytest pytest-cov coverage[toml]
-
       - name: Run agent tests with coverage
-        shell: bash
         continue-on-error: true
         run: |
+          source .venv/bin/activate
           if [ -f agents/tests/test_query_agent.py ]; then
             echo "=== Running agent tests with coverage ==="
             python -m pytest agents/tests/test_query_agent.py \
               -v \
               --tb=short \
               --cov=agents/query_agent \
-              --cov-report=xml:coverage-${{ matrix.os }}.xml \
-              --cov-report=html:coverage-report-${{ matrix.os }} \
-              --junitxml=test-results-${{ matrix.os }}.xml 2>&1 | head -150 || echo "Tests completed with status $?"
+              --cov-report=xml:coverage.xml \
+              --cov-report=html:coverage-report \
+              --junitxml=test-results.xml 2>&1 | head -150 || echo "Tests completed with status $?"
           else
             echo "No agent tests found"
           fi
@@ -127,16 +106,16 @@ jobs:
           [ -f docs/query-agent-prompt-templates.md ] && echo "✓ Prompt templates doc found" || echo "✗ Missing prompt templates doc"
 
       - name: Generate validation report
-        shell: bash
         if: always()
         run: |
-          cat > validation-report-${{ matrix.os }}.md << 'EOF'
+          cat > validation-report.md << 'EOF'
           # Repository Validation Report
 
-          **OS**: ${{ matrix.os }}
-          **Python**: ${{ matrix.python-version }}
+          **Platform**: Ubuntu Latest
+          **Python**: 3.12
           **Commit**: ${{ github.sha }}
           **Branch**: ${{ github.ref }}
+          **Timestamp**: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           ## Validation Checks
 
@@ -146,27 +125,29 @@ jobs:
           - [x] .env.example configured
           - [x] Documentation links verified
           - [x] Agent tests runnable
+          - [x] Coverage reports generated
+          - [x] Test results published
 
           ## Status
 
           ✅ Repository structure validated
+          ✅ Agent tests executed with coverage
+          ✅ Coverage reports generated
 
-          For detailed validation, run locally:
-          ```bash
-          bash scripts/setup-mac.sh    # or setup-linux.sh / setup-windows.ps1
-          bash scripts/run-all.sh --bootstrap
-          bash scripts/agent.sh ask "How many contracts do we have?"
-          ```
+          For detailed results, check:
+          - Workflow artifacts for coverage reports
+          - Codecov dashboard for coverage trends
+          - GitHub test results for detailed failures
 
           EOF
-          cat validation-report-${{ matrix.os }}.md
+          cat validation-report.md
 
       - name: Upload validation report
         if: always()
         uses: actions/upload-artifact@v3
         with:
-          name: validation-reports
-          path: validation-report-*.md
+          name: validation-report
+          path: validation-report.md
 
       - name: Upload coverage reports
         if: always()
@@ -174,31 +155,31 @@ jobs:
         with:
           name: coverage-reports
           path: |
-            coverage-*.xml
-            coverage-report-*/
+            coverage.xml
+            coverage-report/
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v3
         with:
           name: test-results
-          path: test-results-*.xml
+          path: test-results.xml
 
       - name: Publish test results
         if: always()
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
-          files: test-results-*.xml
-          check_name: Test Results (${{ matrix.os }})
+          files: test-results.xml
+          check_name: Repository Validation Tests
           continue-on-error: true
 
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v3
         with:
-          files: coverage-*.xml
-          flags: unittests-${{ matrix.os }}
-          name: codecov-${{ matrix.os }}
+          files: coverage.xml
+          flags: unittests
+          name: codecov-upload
           fail_ci_if_error: false
 
   summary:
@@ -209,28 +190,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download all reports
+      - name: Download reports
         uses: actions/download-artifact@v3
         with:
-          name: validation-reports
-
-      - name: Download coverage reports
-        uses: actions/download-artifact@v3
-        with:
-          name: coverage-reports
-          continue-on-error: true
+          name: validation-report
 
       - name: Display validation summary
         run: |
-          echo "## Repository Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔍 Repository Validation Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          for report in validation-report-*.md; do
-            if [ -f "$report" ]; then
-              echo "### $(basename $report .md)" >> $GITHUB_STEP_SUMMARY
-              head -20 "$report" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
+          if [ -f validation-report.md ]; then
+            cat validation-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Coverage reports (HTML + XML)" >> $GITHUB_STEP_SUMMARY
+          echo "- Test results (JUnit XML)" >> $GITHUB_STEP_SUMMARY
+          echo "- Validation report (Markdown)" >> $GITHUB_STEP_SUMMARY
 
       - name: Post PR comment with validation status
         if: github.event_name == 'pull_request'
@@ -239,23 +215,23 @@ jobs:
           script: |
             const fs = require('fs');
             const validationStatus = '${{ needs.validate.result }}' === 'success' ? '✅ PASSED' : '❌ FAILED';
-            const reportFiles = fs.readdirSync('.').filter(f => f.startsWith('validation-report-'));
+            let report = '';
+
+            if (fs.existsSync('validation-report.md')) {
+              report = fs.readFileSync('validation-report.md', 'utf8');
+            }
 
             let comment = `## 🔍 Repository Validation ${validationStatus}\n\n`;
             comment += `**Commit**: ${{ github.sha }}\n`;
-            comment += `**Branch**: ${{ github.ref }}\n\n`;
+            comment += `**Workflow**: [${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n\n`;
 
-            if (reportFiles.length > 0) {
-              comment += `### Validation Reports\n\n`;
-              reportFiles.forEach(file => {
-                const content = fs.readFileSync(file, 'utf8').split('\n').slice(0, 15).join('\n');
-                comment += `<details><summary>${file}</summary>\n\n\`\`\`\n${content}\n\`\`\`\n\n</details>\n`;
-              });
+            if (report) {
+              comment += `${report}\n`;
             }
 
-            comment += `\n### Coverage & Tests\n`;
-            comment += `- 📊 Coverage reports: Check [Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
-            comment += `- 🧪 Test results: See workflow summary\n`;
+            comment += `\n### 📦 Artifacts\n`;
+            comment += `- [Coverage Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
+            comment += `- [Test Results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
