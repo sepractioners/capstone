@@ -72,7 +72,6 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          uv pip install -e .
           uv pip install pytest pytest-cov coverage[toml]
 
       - name: Run agent tests with coverage
