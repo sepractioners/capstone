@@ -4,7 +4,7 @@
 
 1. **[Better Data Than Better Models](#insight-1-better-data-than-better-models)** — Training data quality > model size. Gemma4 + CUAD examples > larger models without grounding.
 
-2. **[Structured Cognitive Loops](#insight-2-structured-cognitive-loops)** — System prompts: Goal → Sub-goals → Constraints → Conditions. Prevents hallucination and inconsistency.
+2. **[Structured Reasoning Scaffolds](#insight-2-structured-reasoning-scaffolds)** — System prompts: Goal → Sub-goals → Constraints → Conditions. Reduces hallucination and inconsistency - but live query-agent testing later found this isn't sufficient alone on a small model; see the note in Insight 2 below.
 
 3. **[Agent Grounding: Plan → Prep → Pipeline](#insight-3-agent-grounding-plan--prep--pipeline)** — High-quality training data + semantic retrieval. CUAD dataset was the force multiplier.
 
@@ -90,7 +90,19 @@ Build better ingestion pipelines. Don't chase larger models.
 
 ---
 
-## 💡 Insight 2: Structured Cognitive Loops
+## 💡 Insight 2: Structured Reasoning Scaffolds
+
+> **Naming correction, added later.** This was originally called "Structured
+> Cognitive Loops." The pattern below is a fixed structure for *one* prompt,
+> applied once - not an iterative loop (a real loop would be perceive → act →
+> observe → repeat). Renamed to avoid confusing it with the query agent's
+> actual loops (a cross-turn clarification loop, and two bounded in-request
+> self-correction loops), which are a different, separate concept - see
+> [ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md).
+> Also found empirically once this pattern was live-tested on a small model:
+> explicit constraints reduce but do not eliminate hallucination on their own
+> - see [MCP_HEURISTICS.md Pattern 6](MCP_HEURISTICS.md#pattern-6-structured-reasoning-scaffolds)
+> for the concrete evidence and what to pair the scaffold with.
 
 ### Current Agent Gaps (That Motivated This)
 
@@ -144,6 +156,12 @@ Escalate conditions:
 ```
 
 #### Query Agent (Structured)
+
+*The Week 1 sketch below is the original illustration of the pattern, kept
+for history - it predates the actual routing design (a catalogue of twelve
+prompt templates, not one generic RAG flow). For what's actually implemented,
+see [`docs/query-agent-prompt-templates.md`](docs/query-agent-prompt-templates.md)
+and [ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md).*
 
 ```
 Goal: Answer questions grounded in contract evidence

@@ -17,7 +17,7 @@ flowchart LR
     RAG --> EA
     EA --> EMCP["Extraction MCP (write)"]
 
-    QMCP["Query MCP (read-only)<br/>imports & wraps ↓"] --> QA["Query Agent<br/>plan → gather → interpret → draft → verify"]
+    QMCP["Query MCP (read-only)<br/>imports & wraps ↓"] --> QA["Query Agent<br/>plan → gather → interpret → coverage → draft → verify"]
     QA --> Portfolio["portfolio.py<br/>count / list / find / aggregate (deterministic)"]
 
     EMCP --> App["app<br/>domain + services"]
@@ -100,7 +100,7 @@ not the other way round. Agents never import `app/` internals.
 
 ---
 
-### Query Agent (plan → gather → interpret → draft → verify)
+### Query Agent (plan → gather → interpret → coverage → draft → verify)
 
 **Role**: Answer organization-wide questions about tenant-scoped stored contracts.
 
@@ -130,7 +130,7 @@ detail and every knob.
 | Type | Scope | Persistence | Purpose |
 |------|-------|-------------|---------|
 | **Working Memory** (Extraction) | Per document | None (discarded after run) | Thread state across pages: title, type, parties, defined terms, renewal/termination terms. Never cross-document or cross-tenant. |
-| **Scratchpad** (Query) | Per request | None (discarded after response) | Planned tool calls, evidence labels, `what_matters` for one `plan → gather → interpret → draft → verify` run. |
+| **Scratchpad** (Query) | Per request | None (discarded after response) | Planned tool calls, evidence labels, `what_matters` for one `plan → gather → interpret → coverage → draft → verify` run. |
 | **Episodic Memory** | Per conversation | SQLite log + bounded window + rolling summary | User/assistant messages, run status, SSE events. Owned by the orchestrator; the query agent gets it as read-only `history`. |
 | **Semantic Knowledge** (Extraction only) | Global | `rag_knowledge.sqlite3` (FTS5 + embeddings) | Contract-type profiles + CUAD clause examples. Read-only. The query agent does **not** use this — it ranks the tenant's own clauses in-request. |
 
@@ -170,7 +170,7 @@ services → `clm.sqlite3`. Review `blocker` findings return
 `requires_human_confirmation` and stop the write.
 
 **Analyze:** portal question → orchestrator `analyze` step → Query MCP (tenant
-check, then `answer()`) → `plan → gather → interpret → draft → verify` →
+check, then `answer()`) → `plan → gather → interpret → coverage → draft → verify` →
 streamed answer + citations, or a terminal failure (never a guess).
 
 **Second ingest path (no LLM):** `synthetic_data_loader/seed_contracts.py` builds

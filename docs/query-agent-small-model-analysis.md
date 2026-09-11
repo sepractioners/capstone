@@ -1,5 +1,14 @@
 # Query Agent — Small-Model Analysis & Benchmark
 
+> **Superseded.** This is a scratch working doc from before the routing
+> overhaul - the pipeline table below predates the prompt-template routing,
+> the deterministic-compose split, coverage detection, and the bounded
+> self-correction loops. It's kept for history, not maintained. For the
+> current design and its own small-model findings (live A/B evidence, not
+> just a table), see [ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md),
+> [`query-agent-prompt-templates.md`](query-agent-prompt-templates.md), and
+> [`query-agent-quick-tour.md`](query-agent-quick-tour.md).
+
 Status: **in progress**. Tracks why the query agent fails on small local models,
 where the failures localise in the pipeline, the design change proposed to fix
 them, and the benchmark that measures the trade-offs.

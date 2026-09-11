@@ -23,8 +23,8 @@ Access via web portal, CLI, or REST API. Local-first by default (Ollama); switch
 
 **Why this architecture?** See [HYPOTHESIS_AND_LEARNINGS.md](HYPOTHESIS_AND_LEARNINGS.md) for the full story. Key insights:
 
-1. **Data quality > model size** — Gemma4 + CUAD examples > larger models without grounding
-2. **Structured prompts prevent hallucination** — Goal → Sub-goals → Constraints → Escalate conditions
+1. **Data quality > model size** — Gemma4 + CUAD examples > larger models without grounding; the same pattern shows up one level down too, in a template's own planning spec (see [MCP_HEURISTICS.md Pattern 5](MCP_HEURISTICS.md#pattern-5-better-data-than-bigger-models))
+2. **Structured reasoning scaffolds reduce hallucination, but aren't sufficient alone** — Goal → Sub-goals → Constraints → Escalate conditions per capability; live testing found explicit constraints still get violated on a small model, so pair the scaffold with an independent check (verify) and a safe fallback (deterministic compose), not just a better-worded prompt ([MCP_HEURISTICS.md Pattern 6](MCP_HEURISTICS.md#pattern-6-structured-reasoning-scaffolds))
 3. **Grounding requires: Plan → Prep → Pipeline** — Examples → structured data → fast retrieval
 4. **Local-first wins** — Docling + SQLite + Ollama > AWS infrastructure (simpler, faster, private)
 5. **Observability is foundational** — Execution traces essential for debugging agents
@@ -207,12 +207,24 @@ The extraction agent's knowledge base is derived from the Contract Understanding
 
 **LLM Providers** (edit `.env`):
 
-| Provider | Default | Setup |
-|----------|---------|-------|
-| **Ollama** (local) | ✅ Gemma4 | `ollama serve` then `ollama pull gemma4:latest` |
-| **OpenRouter** | — | Set `LLM_PROVIDER=openrouter` + `OPENROUTER_API_KEY` |
-| **Claude (Anthropic)** | — | Set `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` |
-| **GPT-4 (OpenAI)** | — | Set `LLM_PROVIDER=openai` + `OPENAI_API_KEY` |
+Every role (extraction/review/planner/summary/query/platform) resolves its own
+provider independently - there is no single global default:
+
+| Role | Built-in default (no env set) |
+|---|---|
+| `extraction`, `review`, `planner`, `summary` | Claude (Anthropic) - `claude-haiku-4-5-20251001` |
+| `query`, `platform` | Ollama (local) - `gemma4:latest` |
+
+`LLM_PROVIDER` / `LLM_MODEL` override every role at once; `<ROLE>_LLM_*` overrides
+one role. Full resolution order and every provider's setup:
+[`docs/memory-and-reasoning.md`](docs/memory-and-reasoning.md#llm-provider--embedding-settings).
+
+| Provider | Setup |
+|----------|-------|
+| **Ollama** (local) | `ollama serve` then `ollama pull gemma4:latest` |
+| **OpenRouter** | Set `LLM_PROVIDER=openrouter` + `OPENROUTER_API_KEY` |
+| **Claude (Anthropic)** | Set `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` |
+| **GPT-4 (OpenAI)** | Set `LLM_PROVIDER=openai` + `OPENAI_API_KEY` |
 
 **Agent Configuration** (in `.env`):
 ```bash
