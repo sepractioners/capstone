@@ -1,6 +1,7 @@
 # Local secrets and development environment
 .env
 *.env
+.env.*
 .certs/
 .venv/
 .claude/

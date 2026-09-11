@@ -100,6 +100,10 @@ bash scripts/agent.sh chat                                      # interactive
 bash scripts/agent.sh ask "Show the clauses" --contract-id <uuid>
 ```
 
+**One real question per prompt template (T1–T12), with the literal captured
+answer** — run end-to-end through this exact CLI path, not a probe:
+[`docs/query-agent-quick-tour.md`](docs/query-agent-quick-tour.md).
+
 Use a **different account** or a raw `clm-agent` call: pass credentials to the wrapper —
 `bash scripts/agent.sh --email you@org.test --password 'secret' ask "..."` — or get a
 token yourself and export it:
@@ -130,15 +134,18 @@ Without `CLM_AGENT_TOKEN`, `clm-agent` prompts for a bearer token interactively.
 4. Validate (retry if confidence <70%; escalate if <50% after retry)
 5. Persist via MCP server
 
-**Query workflow (`plan → gather → interpret → draft → verify`):**
-1. **Plan** — one LLM call classifies the question and emits one tool call per distinct need (a count, a filtered list, a clause lookup can all be in one question). Deterministic keyword guards add any tool the planner missed, including relative-date (`expiring in 90 days`) and value (`over $1M`) filters.
+**Query workflow (`plan → gather → interpret → coverage → draft → verify`):**
+1. **Plan** — one LLM call names a **prompt template** ([`docs/query-agent-prompt-templates.md`](docs/query-agent-prompt-templates.md)) and emits one tool call per distinct need using only that template's tools. `_guard_plan` does filter-value hygiene only (facet spelling; relative-date / value filters parsed from the text; drop calls outside the allowlist). `QUERY_PLAN_TOOLS=0` is a degraded mode — deterministic keyword routing, no LLM planner. A question that projects onto no template on either path becomes a clarifying question, not a guessed plan, bounded by `QUERY_CLARIFY_MAX_ROUNDS`. See [ADR-0004](docs/adr/0004-query-agent-routing-and-retrieval.md).
 2. **Gather** — run the planned calls:
    - `count_contracts` / `list_contracts` / `aggregate_contracts` — exact counts, lists, and count/sum/avg/min/max of contract value. **All arithmetic happens here; the model never computes numbers.**
    - `find_contracts` — every contract whose clause/obligation text contains a phrase (complete enumeration).
-   - `search_clauses` — embedding-ranked clause snippets, only for one-/few-contract detail questions.
-3. **Interpret** — for clause snippets, build a trigger → consequence → "what matters" view (best-effort).
-4. **Draft** — synthesise across counts, lists, and clause evidence with citations, a confidence value, and an uncertainty flag.
-5. **Verify** — counts and lists are authoritative for numbers; clause claims must be backed by cited evidence.
+   - `search_clauses` — embedding-ranked clause snippets, only for one-/few-contract detail questions or, per a synthesis template, one call per named topic.
+
+   A synthesis-mode template whose gather came back with zero clause text gets one bounded replan with that gap named before falling through to a safe, deterministic answer ([ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md)).
+3. **Interpret** — for clause snippets, build a trigger → consequence → "what matters" view (best-effort), each point grounded in one evidence entry.
+4. **Coverage** — when a synthesis rests on a sample of a larger matched set, the answer must say so and offer the exact count or a narrower filter.
+5. **Draft** — synthesise across counts, lists, and clause evidence with citations, a confidence value, and an uncertainty flag.
+6. **Verify** — counts and lists are authoritative for numbers; clause claims must be backed by cited evidence; an answer implying completeness while coverage is partial is rejected. An unsupported claim gets one bounded redraft before shipping with a capped confidence ([ADR-0005](docs/adr/0005-query-agent-self-correction-loops.md)).
 
 The Query MCP re-checks organization membership on every call. The agent cannot retrieve outside what the MCP returns; a provider failure returns a terminal run failure, not a fabricated answer.
 
@@ -210,7 +217,7 @@ The extraction agent's knowledge base is derived from the Contract Understanding
 **Agent Configuration** (in `.env`):
 ```bash
 EXTRACTION_RAG_ENABLED=1              # Enable RAG for extraction
-QUERY_PLAN_TOOLS=1                    # Enable query planning
+QUERY_PLAN_TOOLS=1                    # 1: LLM planner names a prompt template; 0: degraded (keyword) routing
 PLANNER_MAX_STEPS=3                   # Max planning iterations
 ```
 
@@ -232,18 +239,21 @@ User uploads PDF
 **Query Pipeline (Answer questions about contracts):**
 ```
 User asks: "Which contracts expire this quarter?"
-  → route: keyword + facet match → list_contracts(expiring_within_days=90)   (no LLM)
+  → plan: LLM names a prompt template (templates.yaml) → tool calls in its allowlist
+          (QUERY_PLAN_TOOLS=0: deterministic keyword routing, no LLM)
+  → _guard_plan: filter-value hygiene only (facet spelling, parsed date/value filters)
   → deterministic tools run over clm.sqlite3 (SQL, no LLM math)
   → search_clauses (embeddings) only if the question needs clause text
+  → coverage: matched set vs what the model read
   → compose: structural answer templated from tool output (no LLM);
-             LLM draft only for clause synthesis
-  → verify: counts/lists authoritative; clause claims need cited evidence
+             LLM draft only for clause synthesis, which must state coverage
+  → verify: counts/lists authoritative; no false completeness
 ```
 
 **Why this design:**
-- Routing and structural composition are deterministic — a wrong count is a code bug, not model variance
-- Deterministic tools: every count, sum, and date filter, exact and auditable, in `contract_calc`
-- The model is used only for clause synthesis and the verify pass; the tour's count/list/breakdown questions are model-independent
+- The model routes from a spec (the prompt-template catalogue), not a keyword table — see [ADR-0004](docs/adr/0004-query-agent-routing-and-retrieval.md)
+- Deterministic tools: every count, sum, and date filter, exact and auditable, in `contract_calc` — a wrong number is a code bug, not model variance
+- The model is used for template choice, clause synthesis, and the verify pass; count/list/breakdown questions are model-independent
 - RAG (`rag_knowledge.sqlite3`) is extraction-only — the query agent never reads it
 
 ---

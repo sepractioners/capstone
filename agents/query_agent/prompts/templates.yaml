@@ -1,0 +1,309 @@
+# Query-agent prompt templates — the routing spec the planner reasons from.
+#
+# The planner names ONE template for a question; that fixes the tool allowlist.
+# `_guard_plan` drops any planned call whose tool is not in the named template's
+# `tools`, then applies filter-value hygiene. No tool *selection* lives in code.
+#
+# Human-facing rationale + the question taxonomy: docs/query-agent-prompt-templates.md
+#
+# mode:  D = deterministic (composes with no LLM draft; the only templates the
+#            QUERY_PLAN_TOOLS=0 degraded mode routes to well)
+#        S = needs LLM synthesis over retrieved evidence
+#        cov = coverage-sensitive: when the matched set is larger than what the
+#              model read, the answer must say so and offer the count / a filter
+#
+# Every tool call is implicitly scoped to the caller's organization_id — there is
+# no unscoped read. Counts, sums and date math are computed by the tools, never
+# by the model.
+
+# Suggested to the planner for a question with no clear fit - advisory only.
+# Code does NOT auto-expand this: a plan with no calls (planner declined/timed
+# out, or named this with nothing usable, and deterministic routing also found
+# nothing) is never fabricated - the agent asks the human instead (ADR-0004 D3).
+fallback: T9_risk_exposure_review
+
+templates:
+
+  T1_portfolio_census:
+    mode: D
+    tools: [count_contracts, aggregate_contracts]
+    cues:
+      - "how many contracts do we have"
+      - "break down the portfolio by type / status"
+      - "count of NDAs / active contracts"
+      - "how many of each status"
+    scaffold: >
+      A count or breakdown of the portfolio. Call count_contracts with the filter
+      the question names; for a grouped breakdown call aggregate_contracts
+      measure=count group_by=<lifecycle_status|contract_type|party>. No text tool.
+      Report the total and the breakdown book exactly as the tool returns them;
+      cite contract_id "portfolio". Deciding which tool: it's a breakdown
+      (aggregate_contracts, group_by needed) only if the question names a
+      grouping word - "by type", "by status", "each status", "per party", "how
+      many of each". A bare "how many" with no grouping word is a single total
+      - count_contracts, no group_by. Deciding the group_by value: "by status"
+      -> lifecycle_status, "by type" -> contract_type, "by party" / "per
+      customer" -> party - pick the one the question's own wording names, not
+      a default.
+
+  T2_filtered_roster:
+    mode: D cov
+    tools: [list_contracts, count_contracts]
+    cues:
+      - "list all active vendor agreements"
+      - "which contracts are with <party>"
+      - "show approved master services agreements"
+    scaffold: >
+      List the contracts matching structured criteria. Call list_contracts with
+      every filter the question names, using the exact facet spelling. detail=full
+      only when the matched set is small. Add count_contracts with the same filter
+      if a count is also asked. If matched exceeds the rows returned, say
+      "N match — showing the first K". Deciding detail: use detail=full only
+      when the filter names 2+ facets together (e.g. status AND type AND
+      party) or the question asks for full records explicitly ("show me the
+      details", "full records") - a single-facet filter ("active contracts",
+      "NDAs") is usually a large set, use detail=summary. When unsure, default
+      to detail=summary; a follow-up can always ask for more on one contract.
+
+  T3_clause_presence:
+    mode: D cov
+    tools: [find_contracts, count_contracts]
+    cues:
+      - "which contracts require liability insurance"
+      - "do any contracts have a non-compete"
+      - "contracts that mention arbitration"
+    scaffold: >
+      "Which contracts contain / require / mention X." Call find_contracts with
+      query = the key phrase only ("liability insurance", not the whole question).
+      This scans every contract in scope — do not use search_clauses here. Add a
+      structural filter if the question names one. The matched count is exact and
+      authoritative; list contract names up to the cap plus "and N more".
+      Deriving the query phrase: take the noun phrase naming the clause/
+      obligation topic itself ("liability insurance", "non-compete",
+      "arbitration") and drop everything else - question words ("which",
+      "do any"), scope words ("all", "our", "any"), and filter words already
+      captured as a separate facet (those go in the structural filter, not the
+      query text).
+
+  T4_financial_rollup:
+    mode: D
+    tools: [aggregate_contracts, list_contracts]
+    cues:
+      - "total value of active contracts"
+      - "average contract value by type"
+      - "how much do we pay <party>"
+      - "contracts worth over $1M"
+    scaffold: >
+      Value math. Call aggregate_contracts with the measure
+      (sum_value|avg_value|min_value|max_value), optional group_by, and the
+      filter. The tool does all arithmetic and currency handling — never add,
+      average or convert values yourself. For "worth over $X" call list_contracts
+      min_value=X. If value data is missing, say so plainly. Deriving measure
+      from the question's wording: "total" / "combined" / "how much do we pay"
+      -> sum_value; "average" / "typical" -> avg_value; "smallest" /
+      "cheapest" / "lowest" -> min_value; "largest" / "biggest deal" /
+      "most expensive" -> max_value. "Worth over/under $X" is a filter
+      (list_contracts min_value/max_value), never aggregate_contracts - it's
+      asking which contracts qualify, not a computed figure.
+
+  T5_expiring_and_renewals:
+    mode: D
+    tools: [list_contracts, find_contracts, search_clauses]
+    cues:
+      - "which contracts expire in the next quarter"
+      - "what renews automatically this year"
+      - "contracts signed in 2024"
+      - "up for renewal soon"
+    scaffold: >
+      Temporal question. Call list_contracts with expiring_within_days (pass the
+      window in days — never compute a date) or effective_year. Deriving the
+      window: "next quarter" / "soon" / "coming up" -> 90; "this month" -> 30;
+      "this year" -> 365; a number the question states ("next 60 days") ->
+      that number, always in days. "Signed in <year>" / "dated <year>" is
+      effective_year, not expiring_within_days - pick whichever the question
+      is actually asking about (when it starts vs. when it ends). Only if the
+      question also asks what notice or action is required, add
+      search_clauses("renewal notice period") over the matched set. Convey the
+      matched count.
+
+  T6_clause_detail:
+    mode: S
+    tools: [list_contracts, search_clauses]
+    cues:
+      - "what does the indemnity clause in the <name> MSA say"
+      - "explain the termination terms for <contract>"
+      - "the liability cap in our largest deal"
+    scaffold: >
+      Explain a specific clause for one or a few contracts. If a contract is named
+      but its id is unknown, call list_contracts to resolve it, then
+      search_clauses(query=<clause topic>) scoped to it. Quote or paraphrase only
+      what the evidence contains; if the clause is not present, say "not stated in
+      <contract>". Bounded by construction — low coverage risk.
+    deduction_procedure: >
+      Read every retrieved clause for the named contract before answering -
+      not just the first one returned. Quote or closely paraphrase only what
+      the clause text actually states; never fill a gap with what this kind
+      of clause usually says elsewhere. If the question asks about one
+      specific term (a notice period, a cap amount, a trigger condition) and
+      the retrieved text does not state that specific term, answer "not
+      stated in <contract>" for that term - do not infer a typical value or
+      answer a nearby-but-different term instead. If two retrieved clauses
+      address the same point differently (e.g. a general rule and a named
+      exception), state both and which one governs, rather than picking one
+      and silently dropping the other.
+
+  T7_cross_contract_synthesis:
+    mode: S cov
+    tools: [find_contracts, search_clauses]
+    cues:
+      - "what payment obligations do we have across all contracts"
+      - "our indemnification exposure across the portfolio"
+      - "how is liability limited across our contracts"
+    scaffold: >
+      "What are our X across the portfolio." Call find_contracts(query=<topic
+      phrase>) for the full matched set and search_clauses(query=<the question>)
+      for the top-K clause evidence. Build the trigger -> consequence ->
+      what-matters model from the evidence, then synthesise. You are reading a
+      sample, not every contract — state that.
+    deduction_procedure: >
+      Build the answer only from clauses you actually retrieved via
+      search_clauses - find_contracts's matched count tells you how many
+      contracts touch the topic but never what they say, so it can size the
+      set but never support a claim about content. Group what you read by how
+      it actually treats the topic (e.g. "N of the M contracts I read cap X at
+      Y; the rest leave it open") instead of listing every contract
+      individually. A pattern word ("most", "typically", "generally")
+      requires you to have actually read enough of the sample to support it -
+      if you only read a handful, describe those specific contracts instead
+      of generalising to the portfolio. State the exact count read vs. matched
+      and never imply the pattern holds for contracts you did not read.
+    coverage: >
+      "Based on the N most relevant clauses across M matching contracts — ask
+      about a specific contract or request the full list."
+
+  T8_comparative_review:
+    mode: S cov
+    tools: [list_contracts, search_clauses]
+    cues:
+      - "how does the <name> deal compare to our other vendor agreements"
+      - "are our NDAs consistent"
+      - "which contracts have the most unfavourable <dimension>"
+    scaffold: >
+      Compare a contract to a cohort, or check consistency across one. Call
+      list_contracts for the cohort and search_clauses for the clauses in
+      question across it. Report the shared pattern and name the outliers. State
+      how many of the cohort you actually examined.
+    deduction_procedure: >
+      First determine the cohort's majority/typical treatment of the
+      dimension in question from the clauses you actually retrieved - do not
+      decide what's "typical" before reading them. Then classify each
+      examined contract as matching that majority or as an outlier. An
+      outlier claim requires quoting the specific text that differs from the
+      majority treatment, naming what the majority says for comparison. Do
+      not call something "unfavourable" or an "outlier" without first
+      establishing what the majority/typical treatment actually is from
+      evidence - a single data point with nothing to compare it against is
+      not a pattern, and is not yet a finding.
+
+  T9_risk_exposure_review:
+    mode: S cov
+    tools: [find_contracts, list_contracts, search_clauses]
+    cues:
+      - "what are the biggest contractual risks in our portfolio"
+      - "where are we most exposed"
+      - "what should I be worried about"
+      - (also the fallback for any question that fits no other template)
+    scaffold: >
+      Open-ended risk / exposure. Decompose into concrete probes, one PAIR per
+      topic: for each of "indemnification", "limitation of liability",
+      "termination for convenience" and "auto-renewal", call BOTH
+      find_contracts(query=<topic>) for the matched count AND
+      search_clauses(query=<topic>) for the real clause text - find_contracts
+      alone tells you a contract touches the topic, never what it says. A topic
+      you only ran find_contracts on has no evidence and must not be discussed
+      in the answer; say it was matched but not reviewed this pass instead. Also
+      call list_contracts expiring_within_days=90 for near-term deadlines. Build
+      what_matters only from clauses you actually retrieved via search_clauses -
+      each point needs a one-line why, a severity, and the contract_id it came
+      from. Never assert a risk without a cited clause.
+    deduction_procedure: >
+      For each retrieved clause, produce exactly ONE what_matters point - never
+      one point per dimension. Do this in order and show the work, don't skip
+      to a severity label: (1) check the clause's OWN TEXT against all four
+      dimensions - EXPOSURE (is liability/financial exposure capped, limited,
+      or left open-ended, per the text), CONTROL (can the counterparty act -
+      terminate, modify, enforce - without our recourse or notice, per the
+      text), WINDOW (does the text impose a deadline or a narrow window to act
+      that is easy to miss), LOCK-IN (does the text create a commitment that
+      is hard to exit); (2) count how many of the four actually trigger, and
+      quote the exact text that triggers each one; (3) assign ONE severity for
+      the clause as a whole - high if 2+ dimensions trigger, medium if 1, low
+      if none trigger or the clause is protective/mutual on every dimension
+      you can judge. The `why` field must list every dimension that triggered
+      plus the quoted text, AND must be consistent with the severity you give
+      it - if your own why states the counterparty can act without recourse,
+      CONTROL triggered and must count toward severity, it cannot be labeled
+      low in the same breath. A capped or mutual clause is low severity or not
+      a finding at all - never label a clause "high" by default; the judgment
+      comes from what this specific text says, not from what this kind of
+      clause usually says.
+    coverage: >
+      "Reviewed <these dimensions> across N contracts — a first pass, not
+      exhaustive."
+
+  T10_obligation_tracker:
+    mode: D
+    tools: [list_contracts, find_contracts]
+    cues:
+      - "what do we owe and when"
+      - "obligations due in the next 90 days"
+      - "our reporting obligations"
+    scaffold: >
+      "What do we owe / what is due." Call list_contracts detail=full to read
+      obligations with their due dates, or find_contracts on obligation text for a
+      topic ("reporting", "payment"). Date-bound where the question implies it.
+      List obligation -> responsible party -> due date; never invent a date.
+      Deciding which tool: the question names a specific topic ("reporting
+      obligations", "payment obligations") -> find_contracts(query=<topic>);
+      the question asks broadly what's owed/due with no topic -> list_contracts
+      detail=full so every obligation's due date is visible. "Due in the next
+      N days" -> also add expiring_within_days=N as a filter, it bounds by
+      date without computing one.
+
+  T11_counterparty_profile:
+    mode: D
+    tools: [list_contracts, count_contracts, aggregate_contracts]
+    cues:
+      - "everything we have with <party>"
+      - "top counterparties by contract count / value"
+      - "who have we signed the most deals with"
+    scaffold: >
+      Party-centric. For "everything with <party>" call list_contracts
+      party=<name>. For rankings call aggregate_contracts group_by=party (measure
+      count or sum_value). Report per-party figures exactly as the tool returns.
+      Deciding which tool: the question names one specific party -> list_contracts
+      party=<name>, never aggregate_contracts (there's nothing to rank with one
+      party). The question asks "top" / "most" / "ranked by" with no single
+      party named -> aggregate_contracts group_by=party - measure=count for
+      "most deals/contracts", measure=sum_value for "most valuable" / "highest
+      spend".
+
+  T12_out_of_scope:
+    mode: D
+    tools: []
+    cues:
+      - "should we renew the <name> contract"
+      - "is this clause market-standard"
+      - "what happens if we breach"
+    scaffold: >
+      The question asks for legal advice, a market comparison, a prediction or a
+      recommendation. Call no tools. Respond that you can report what the
+      contracts state, not whether the user should act, what is market-standard,
+      or what a court would do. Offer the in-scope version of the question if
+      there is one. Telling this apart from a nearby in-scope template: if the
+      question can be answered by quoting or summarising what a contract's
+      text says ("what does the termination clause say", "what's our notice
+      period"), it belongs to another template, not here - T12 is only for
+      questions whose answer requires a judgment the contract text itself
+      cannot supply (should we, is this normal/standard, what would a court
+      decide). When unsure, prefer the in-scope reading over T12.

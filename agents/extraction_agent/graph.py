@@ -29,6 +29,10 @@ from .schema import ContractCandidate, PageExtraction
 logger = logging.getLogger(__name__)
 
 PRECEDING_TAIL_CHARS = max(120, int(os.environ.get("EXTRACTION_PAGE_TAIL_CHARS", "400")))
+# 0 = all pages. Cap the per-page LLM loop when a slow local model would
+# otherwise take tens of minutes per contract; parties / title / dates /
+# type live in the first pages of most contracts.
+MAX_PAGES = max(0, int(os.environ.get("EXTRACTION_MAX_PAGES", "0")))
 RAG_SAMPLE_PAGES = max(1, int(os.environ.get("EXTRACTION_RAG_SAMPLE_PAGES", "3")))
 RAG_SAMPLE_CHARS = max(1000, int(os.environ.get("EXTRACTION_RAG_SAMPLE_CHARS", "6000")))
 REVIEW_DOCUMENT_CHARS = max(4000, int(os.environ.get("EXTRACTION_REVIEW_DOCUMENT_CHARS", "30000")))
@@ -122,8 +126,9 @@ async def extract_node(state: PipelineState) -> dict[str, Any]:
             started=rag_started,
         )
 
-        for chunk in loaded.chunks:
-            await _progress(state, {"stage": "extracting", "page": chunk.index + 1, "total_pages": len(loaded.chunks), "label": "Extracting contract"})
+        pages = loaded.chunks if MAX_PAGES == 0 else loaded.chunks[:MAX_PAGES]
+        for chunk in pages:
+            await _progress(state, {"stage": "extracting", "page": chunk.index + 1, "total_pages": len(pages), "label": "Extracting contract"})
             extraction = await extract_page(chunk.index + 1, chunk.text or "", preceding_tail, memory, extraction_trace, profile, state.get("extraction_directive"), debug)
             page_extractions.append(extraction)
             preceding_tail = (chunk.text or "")[-PRECEDING_TAIL_CHARS:]

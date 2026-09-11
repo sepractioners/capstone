@@ -25,7 +25,10 @@ from typing import Any
 from extraction_agent.pipeline import acandidates
 
 FIELDS = ("title", "parties", "contract_type", "effective_date", "expiration_date", "clause_count")
-DEFAULT_DATA_DIR = Path("synthetic_data_loader/data/cuad_subset")
+# Committed offline fixture (8 CC BY 4.0 CUAD contracts) so the eval runs without
+# the opt-in CUAD download. Point --data-dir at synthetic_data_loader/data/cuad_subset
+# for the larger local set.
+DEFAULT_DATA_DIR = Path(__file__).parent / "fixtures" / "cuad_pdf"
 DEFAULT_TRUTH = Path(__file__).parent / "fixtures" / "cuad_ground_truth.jsonl"
 REPORT_DIR = Path(__file__).parent / "reports"
 
