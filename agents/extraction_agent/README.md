@@ -45,7 +45,7 @@ The pipeline is `load → extract → review → ingest`.
   `KeyDates.renewal_deadline` / `termination_notice_deadline`), so the query
   agent and the portal see them on the stored contract.
 
-Full detail: [Memory and Reasoning](../../docs/memory-and-reasoning.md).
+Full detail: [Memory and Reasoning](../../docs/architecture/memory-and-reasoning.md).
 
 ## Documentation
 

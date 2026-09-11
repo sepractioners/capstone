@@ -300,7 +300,7 @@ Agent:
 
 ## Next Steps
 
-1. **Setup**: Follow [SETUP.md](SETUP.md) to run locally
+1. **Setup**: Follow [SETUP.md](setup.md) to run locally
 2. **Seed data**: Use [SEEDING.md](SEEDING.md) to download sample contracts
 3. **Explore**: Login and ask the agent about your contracts
 4. **Customize**: Modify RAG knowledge or contract templates

@@ -4,7 +4,7 @@
 # `_guard_plan` drops any planned call whose tool is not in the named template's
 # `tools`, then applies filter-value hygiene. No tool *selection* lives in code.
 #
-# Human-facing rationale + the question taxonomy: docs/query-agent-prompt-templates.md
+# Human-facing rationale + the question taxonomy: ../docs/prompt-templates.md
 #
 # mode:  D = deterministic (composes with no LLM draft; the only templates the
 #            QUERY_PLAN_TOOLS=0 degraded mode routes to well)

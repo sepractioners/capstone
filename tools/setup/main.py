@@ -116,7 +116,7 @@ def validate_system_requirements(platform_name: str, verbose: bool = True) -> bo
                 )
         else:
             all_ok = False
-            install_cmd = tool_spec.get("install", {}).get(platform_name, "see SETUP.md")
+            install_cmd = tool_spec.get("install", {}).get(platform_name, "see ../docs/setup/setup.md")
             print(Color.error(f"{tool_name} not found (required: {version})"))
             print(f"    {note}")
             print(f"    Install: {install_cmd}")

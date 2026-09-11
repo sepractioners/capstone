@@ -22,7 +22,7 @@ app = MCPServer(
 caller's organization - there is no unscoped read. Counts, sums and date
 arithmetic are computed by the tools, never by the model.
 
-TOOL ROUTING GUIDE (full taxonomy: docs/query-agent-prompt-templates.md):
+TOOL ROUTING GUIDE (full taxonomy: agents/query_agent/docs/prompt-templates.md):
 1. analyze_contracts: a question that needs reasoning / synthesis across clauses -
    "what are our biggest risks", "how is liability limited across the portfolio",
    "what does the Acme indemnity say". Runs the plan -> gather -> synthesise loop.

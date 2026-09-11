@@ -156,7 +156,7 @@ TEMPLATES_PATH = Path(__file__).parent / "prompts" / "templates.yaml"
 
 def _load_templates() -> tuple[dict[str, dict[str, Any]], str]:
     """The routing spec (`templates.yaml`): id -> {tools, cues, scaffold, ...}
-    plus the fallback template id. See docs/query-agent-prompt-templates.md."""
+    plus the fallback template id. See agents/query_agent/docs/prompt-templates.md."""
     import yaml
 
     spec = yaml.safe_load(TEMPLATES_PATH.read_text(encoding="utf-8")) or {}

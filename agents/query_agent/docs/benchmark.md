@@ -29,7 +29,7 @@ query agent; nothing here is a new run.*
 | Old harness | `scripts/bench-query-agent.sh` | **DELETED** `aecc835`; recovered here |
 | Old scorer | `scripts/bench_score.py` | **DELETED** `aecc835`; recovered here |
 | Expected deterministic answers | `README.md` §Validation Data, `docs/adr/0002` | committed |
-| Query-agent hypotheses (H2 history, H5 structured prompts) | `AGENT_HYPOTHESES.md` | committed, untested |
+| Query-agent hypotheses (H2 history, H5 structured prompts) | [`AGENT_HYPOTHESES.md`](../../../docs/hypotheses/agent-hypotheses.md) | committed, untested |
 
 Recovered files sit next to this report:
 `query-agent-small-model-analysis.md`, `bench-query-agent.sh`, `bench_score.py`.
@@ -214,7 +214,7 @@ run:
   "B3 ceiling" run would bound that class. Neither the full B2 (with Q6) nor B3
   has been run.
 
-### Related untested hypotheses (`AGENT_HYPOTHESES.md`)
+### Related untested hypotheses ([`AGENT_HYPOTHESES.md`](../../../docs/hypotheses/agent-hypotheses.md))
 
 - **H2** — conversation history improves multi-turn accuracy ≥20%. Query MCP
   already accepts `history`; benchmark not built.

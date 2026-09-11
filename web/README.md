@@ -77,7 +77,7 @@ The extraction agent talks only to `extraction_mcp_server`; the query agent talk
 only to `query_mcp_server`. Long conversations get a rolling summary
 (`agent_conversations.summary`) written after `AGENT_SUMMARY_MIN_TURNS` turns.
 
-See [Memory and Reasoning](../docs/memory-and-reasoning.md).
+See [Memory and Reasoning](../docs/architecture/memory-and-reasoning.md).
 
 ## Agent Console (separate app)
 

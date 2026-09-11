@@ -21,17 +21,17 @@ Access via web portal, CLI, or REST API. Local-first by default (Ollama); switch
 
 ## 🎓 Key Learnings
 
-**Why this architecture?** See [HYPOTHESIS_AND_LEARNINGS.md](HYPOTHESIS_AND_LEARNINGS.md) for the full story. Key insights:
+**Why this architecture?** See [HYPOTHESIS_AND_LEARNINGS.md](docs/hypotheses/hypothesis-and-learnings.md) for the full story. Key insights:
 
-1. **Data quality > model size** — Gemma4 + CUAD examples > larger models without grounding; the same pattern shows up one level down too, in a template's own planning spec (see [MCP_HEURISTICS.md Pattern 5](MCP_HEURISTICS.md#pattern-5-better-data-than-bigger-models))
-2. **Structured reasoning scaffolds reduce hallucination, but aren't sufficient alone** — Goal → Sub-goals → Constraints → Escalate conditions per capability; live testing found explicit constraints still get violated on a small model, so pair the scaffold with an independent check (verify) and a safe fallback (deterministic compose), not just a better-worded prompt ([MCP_HEURISTICS.md Pattern 6](MCP_HEURISTICS.md#pattern-6-structured-reasoning-scaffolds))
+1. **Data quality > model size** — Gemma4 + CUAD examples > larger models without grounding; the same pattern shows up one level down too, in a template's own planning spec (see [MCP_HEURISTICS.md Pattern 5](docs/hypotheses/mcp-heuristics.md#pattern-5-better-data-than-bigger-models))
+2. **Structured reasoning scaffolds reduce hallucination, but aren't sufficient alone** — Goal → Sub-goals → Constraints → Escalate conditions per capability; live testing found explicit constraints still get violated on a small model, so pair the scaffold with an independent check (verify) and a safe fallback (deterministic compose), not just a better-worded prompt ([MCP_HEURISTICS.md Pattern 6](docs/hypotheses/mcp-heuristics.md#pattern-6-structured-reasoning-scaffolds))
 3. **Grounding requires: Plan → Prep → Pipeline** — Examples → structured data → fast retrieval
 4. **Local-first wins** — Docling + SQLite + Ollama > AWS infrastructure (simpler, faster, private)
 5. **Observability is foundational** — Execution traces essential for debugging agents
 
-**Detailed MCP heuristics & prompt patterns:** [MCP_HEURISTICS.md](MCP_HEURISTICS.md)
+**Detailed MCP heuristics & prompt patterns:** [MCP_HEURISTICS.md](docs/hypotheses/mcp-heuristics.md)
 
-**How agents evolve:** [AGENT_HYPOTHESES.md](AGENT_HYPOTHESES.md) — track hypotheses from test → validated heuristic → embedded in code
+**How agents evolve:** [AGENT_HYPOTHESES.md](docs/hypotheses/agent-hypotheses.md) — track hypotheses from test → validated heuristic → embedded in code
 
 ---
 
@@ -102,7 +102,7 @@ bash scripts/agent.sh ask "Show the clauses" --contract-id <uuid>
 
 **One real question per prompt template (T1–T12), with the literal captured
 answer** — run end-to-end through this exact CLI path, not a probe:
-[`docs/query-agent-quick-tour.md`](docs/query-agent-quick-tour.md).
+[`agents/query_agent/docs/quick-tour.md`](agents/query_agent/docs/quick-tour.md).
 
 Use a **different account** or a raw `clm-agent` call: pass credentials to the wrapper —
 `bash scripts/agent.sh --email you@org.test --password 'secret' ask "..."` — or get a
@@ -135,7 +135,7 @@ Without `CLM_AGENT_TOKEN`, `clm-agent` prompts for a bearer token interactively.
 5. Persist via MCP server
 
 **Query workflow (`plan → gather → interpret → coverage → draft → verify`):**
-1. **Plan** — one LLM call names a **prompt template** ([`docs/query-agent-prompt-templates.md`](docs/query-agent-prompt-templates.md)) and emits one tool call per distinct need using only that template's tools. `_guard_plan` does filter-value hygiene only (facet spelling; relative-date / value filters parsed from the text; drop calls outside the allowlist). `QUERY_PLAN_TOOLS=0` is a degraded mode — deterministic keyword routing, no LLM planner. A question that projects onto no template on either path becomes a clarifying question, not a guessed plan, bounded by `QUERY_CLARIFY_MAX_ROUNDS`. See [ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md).
+1. **Plan** — one LLM call names a **prompt template** ([`agents/query_agent/docs/prompt-templates.md`](agents/query_agent/docs/prompt-templates.md)) and emits one tool call per distinct need using only that template's tools. `_guard_plan` does filter-value hygiene only (facet spelling; relative-date / value filters parsed from the text; drop calls outside the allowlist). `QUERY_PLAN_TOOLS=0` is a degraded mode — deterministic keyword routing, no LLM planner. A question that projects onto no template on either path becomes a clarifying question, not a guessed plan, bounded by `QUERY_CLARIFY_MAX_ROUNDS`. See [ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md).
 2. **Gather** — run the planned calls:
    - `count_contracts` / `list_contracts` / `aggregate_contracts` — exact counts, lists, and count/sum/avg/min/max of contract value. **All arithmetic happens here; the model never computes numbers.**
    - `find_contracts` — every contract whose clause/obligation text contains a phrase (complete enumeration).
@@ -217,7 +217,7 @@ provider independently - there is no single global default:
 
 `LLM_PROVIDER` / `LLM_MODEL` override every role at once; `<ROLE>_LLM_*` overrides
 one role. Full resolution order and every provider's setup:
-[`docs/memory-and-reasoning.md`](docs/memory-and-reasoning.md#llm-provider--embedding-settings).
+[`docs/architecture/memory-and-reasoning.md`](docs/architecture/memory-and-reasoning.md#llm-provider--embedding-settings).
 
 | Provider | Setup |
 |----------|-------|
@@ -315,7 +315,7 @@ uv run pytest
 uv run python -m platform_testing.extraction_eval --limit 8
 ```
 
-See [SETUP.md](SETUP.md) for troubleshooting.
+See [SETUP.md](docs/setup/setup.md) for troubleshooting.
 
 ---
 
@@ -359,7 +359,7 @@ graph TB
     style QMCP fill:#ffcdd2,stroke:#d32f2f
 ```
 
-**Key principles**: agents reach the domain only through MCP servers (which enforce tenant scope + schema); the MCP servers *import and wrap* the agents (one process, one boundary crossed per request); the query agent reads `clm.sqlite3` only — `rag_knowledge.sqlite3` is extraction-only. See [docs/isolation-strategy.md](docs/isolation-strategy.md).
+**Key principles**: agents reach the domain only through MCP servers (which enforce tenant scope + schema); the MCP servers *import and wrap* the agents (one process, one boundary crossed per request); the query agent reads `clm.sqlite3` only — `rag_knowledge.sqlite3` is extraction-only. See [docs/architecture/isolation-strategy.md](docs/architecture/isolation-strategy.md).
 
 **Architecture documentation:** [docs/](docs/) — isolation strategy, design principles, agentic architecture, data lifecycle, memory & reasoning.
 
@@ -367,11 +367,11 @@ graph TB
 
 ## 📖 Full Documentation
 
-- **[HYPOTHESIS_AND_LEARNINGS.md](HYPOTHESIS_AND_LEARNINGS.md)** — Week 1 learnings, pivots, architecture decisions
-- **[MCP_HEURISTICS.md](MCP_HEURISTICS.md)** — MCP server specifications, heuristics, prompt patterns
-- **[AGENT_HYPOTHESES.md](AGENT_HYPOTHESES.md)** — R&D roadmap: active hypotheses, validated heuristics, testing cadence
-- **[DEMO.md](DEMO.md)** — Platform walkthrough with screenshots
-- **[SETUP.md](SETUP.md)** — Detailed setup, troubleshooting, testing
+- **[HYPOTHESIS_AND_LEARNINGS.md](docs/hypotheses/hypothesis-and-learnings.md)** — Week 1 learnings, pivots, architecture decisions
+- **[MCP_HEURISTICS.md](docs/hypotheses/mcp-heuristics.md)** — MCP server specifications, heuristics, prompt patterns
+- **[AGENT_HYPOTHESES.md](docs/hypotheses/agent-hypotheses.md)** — R&D roadmap: active hypotheses, validated heuristics, testing cadence
+- **[DEMO.md](docs/setup/demo.md)** — Platform walkthrough with screenshots
+- **[SETUP.md](docs/setup/setup.md)** — Detailed setup, troubleshooting, testing
 - **[docs/](docs/)** — Architecture, design principles, memory model, data lifecycle
 
 ## Resources

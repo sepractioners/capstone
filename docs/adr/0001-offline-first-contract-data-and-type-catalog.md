@@ -271,7 +271,7 @@ D1 anchors there.
 ## References
 
 - [Data Lifecycle](../data-lifecycle.md)
-- [Seeding Guide](../../SEEDING.md)
+- [Seeding Guide](../setup/seeding.md)
 - [Synthetic Data Loader](../../synthetic_data_loader/README.md)
 - [Kaggle CUAD Scenario](../../agents/extraction_agent/docs/kaggle-cuad.md)
 - CUAD — <https://github.com/TheAtticusProject/cuad>, <https://huggingface.co/datasets/theatticusproject/cuad>

@@ -304,7 +304,7 @@ capstone/
 
 - **For setup issues**: Check the troubleshooting section above or the README
 - **For API/integration questions**: See `web/README.md` and `mcp/README.md`
-- **For agent design**: See `agents/README.md` and `docs/memory-and-reasoning.md`
+- **For agent design**: See `agents/README.md` and `docs/architecture/memory-and-reasoning.md`
 - **For domain model**: See `app/README.md` and `docs/contract-lifecycle-ddd.md`
 
 Happy contracting! 🚀

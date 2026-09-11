@@ -154,4 +154,4 @@ Cross-tenant data is impossible by design.
 
 - [Component Architecture](../README.md#component-architecture) - System structure and isolation
 - [Agentic Solution Architecture](../README.md#agentic-solution-architecture) - How agents orchestrate
-- [Seeding Guide](../SEEDING.md) - How to seed the system with data
+- [Seeding Guide](../setup/seeding.md) - How to seed the system with data

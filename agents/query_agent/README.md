@@ -13,7 +13,7 @@ clause lookup). The agent branches on the *kinds* of question and resolves each.
    read-only conversation `history` (role + text only).
 2. **Plan** (`QUERY_PLAN_TOOLS`, default on) - one LLM call names a **prompt
    template** ([`prompts/templates.yaml`](prompts/templates.yaml), catalogue:
-   [`docs/query-agent-prompt-templates.md`](../../docs/query-agent-prompt-templates.md))
+   [`docs/prompt-templates.md`](../../docs/prompt-templates.md))
    and emits one tool call per distinct need (≤ `QUERY_MAX_TOOL_CALLS`), using
    only that template's tools:
    - `count_contracts` - exact counts / breakdowns. Deterministic, no LLM.
@@ -73,7 +73,7 @@ gracefully; only the final draft step can fail the request.
 
 The planner names one **prompt template** per question; that fixes its tool
 allowlist. Full catalogue - each template's cues, scaffold, answer contract and
-coverage rule: **[`docs/query-agent-prompt-templates.md`](../../docs/query-agent-prompt-templates.md)**.
+coverage rule: **[`docs/prompt-templates.md`](../../docs/prompt-templates.md)**.
 Machine source the planner loads: [`prompts/templates.yaml`](prompts/templates.yaml).
 
 Tools: 🔢 `count_contracts` · 📇 `list_contracts` · 🔎 `find_contracts` ·
@@ -99,8 +99,8 @@ draft; the templates degraded mode routes to) · **S** = LLM synthesis · **cov*
 ### Original hypothesis → template mapping
 
 The templates are how the standing hypotheses / heuristics are enforced in the
-routing layer. Sources: [`AGENT_HYPOTHESES.md`](../../AGENT_HYPOTHESES.md),
-[`MCP_HEURISTICS.md`](../../MCP_HEURISTICS.md) §2 (Query MCP Server).
+routing layer. Sources: [`AGENT_HYPOTHESES.md`](../../docs/hypotheses/agent-hypotheses.md),
+[`MCP_HEURISTICS.md`](../../docs/hypotheses/mcp-heuristics.md) §2 (Query MCP Server).
 
 | Hypothesis / heuristic | Enforced by |
 |---|---|
@@ -161,4 +161,4 @@ rechecks organization membership before running `count_contracts`,
 return a terminal run failure rather than a fabricated answer.
 
 See [Architecture](docs/architecture.md) and
-[Memory and Reasoning](../../docs/memory-and-reasoning.md).
+[Memory and Reasoning](../../docs/architecture/memory-and-reasoning.md).

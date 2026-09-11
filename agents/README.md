@@ -41,5 +41,5 @@ uv run pytest agents/tests
   `agent_llm` from the repo-root `.env`.
 - Returns structured answers with confidence and contract/clause citations.
 
-See [Memory and Reasoning](../docs/memory-and-reasoning.md) for the memory
+See [Memory and Reasoning](../../docs/architecture/memory-and-reasoning.md) for the memory
 taxonomy and reasoning strategy across both agents and the orchestrator.
