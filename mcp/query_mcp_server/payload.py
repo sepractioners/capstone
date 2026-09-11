@@ -18,5 +18,5 @@ class ContractQueryRequest(BaseModel):
     # fresh question). The caller owns this count - it should stop asking and
     # surface a terminal message itself once it reaches the agent's
     # QUERY_CLARIFY_MAX_ROUNDS, rather than relying solely on the agent's own
-    # gate. See ADR-0004 D3.
+    # gate. See ADR-0006 D3.
     clarify_round: int = Field(default=0, ge=0, le=20)

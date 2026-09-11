@@ -6,7 +6,7 @@ query agent; nothing here is a new run.*
 
 > **Update (routing overhaul).** The routing described below (`_guard_plan`
 > keyword tool-selection, `QUERY_PLAN_TOOLS=0` as the effective default) has been
-> replaced — see [ADR-0004](adr/0004-query-agent-routing-and-retrieval.md) and
+> replaced — see [ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md) and
 > [the prompt-template catalogue](query-agent-prompt-templates.md). Routing is now
 > a named prompt template per question; `_guard_plan` is filter-value hygiene
 > only; `q14` routes to `T9_risk_exposure_review` instead of a bare count. The

@@ -28,5 +28,6 @@ We use [MADR](https://adr.github.io/madr/) (lightweight). Each record has:
 | [0001](0001-offline-first-contract-data-and-type-catalog.md) | Proposed | Offline-first contract data and a single contract-type catalog |
 | [0002](0002-query-agent-evaluation-substrate.md) | Proposed | Bounded evaluation substrate for the query agent |
 | [0003](0003-query-agent-stress-corpus.md) | Proposed | Pre-built stress corpus for query-agent validation |
-| [0004](0004-query-agent-routing-and-retrieval.md) | Proposed | Spec-driven query-agent routing; retrieval stays in-process |
-| [0005](0005-query-agent-self-correction-loops.md) | Proposed | Bounded in-request self-correction (replan-on-thin-gather, redraft-on-unsupported) |
+| [0004](0004-query-agent-routing-and-retrieval.md) | Rejected → [0006](0006-query-agent-routing-retrieval-and-self-correction.md) | Spec-driven query-agent routing; retrieval stays in-process |
+| [0005](0005-query-agent-self-correction-loops.md) | Rejected → [0006](0006-query-agent-routing-retrieval-and-self-correction.md) | Bounded in-request self-correction (replan-on-thin-gather, redraft-on-unsupported) |
+| [0006](0006-query-agent-routing-retrieval-and-self-correction.md) | Proposed | Query-agent routing, retrieval, and bounded self-correction (consolidates 0004 + 0005) |

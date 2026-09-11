@@ -7,13 +7,13 @@ file doubles as a data source; prose headings keep it readable as Markdown.
 
 - Harness: [`platform_testing/query_bench.py`](../platform_testing/query_bench.py) (integration) · [`platform_testing/probe/query_agent_probe.py`](../platform_testing/probe/query_agent_probe.py) (subsystem)
 - Committed fixture: [`platform_testing/fixtures/query_bench_questions.jsonl`](../platform_testing/fixtures/query_bench_questions.jsonl)
-- **Routing spec:** [`docs/query-agent-prompt-templates.md`](query-agent-prompt-templates.md) · [ADR-0004](adr/0004-query-agent-routing-and-retrieval.md)
+- **Routing spec:** [`docs/query-agent-prompt-templates.md`](query-agent-prompt-templates.md) · [ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md)
 - Analysis: [`docs/query-agent-small-model-analysis.md`](query-agent-small-model-analysis.md)
 - Consolidated report: [`docs/query-agent-benchmark.md`](query-agent-benchmark.md)
 - Scope decision: [`docs/adr/0002-query-agent-evaluation-substrate.md`](adr/0002-query-agent-evaluation-substrate.md)
 
 > **Note.** The `tool_path` fields below predate the prompt-template routing
-> (ADR-0004). The current spec — one named template per question, fixing its tool
+> (ADR-0006). The current spec — one named template per question, fixing its tool
 > allowlist — is [`query-agent-prompt-templates.md`](query-agent-prompt-templates.md);
 > the probe scores the resolved plan against `expect_plan` in the fixture.
 

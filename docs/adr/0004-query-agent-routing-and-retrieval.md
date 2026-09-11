@@ -1,11 +1,15 @@
 # ADR-0004: Spec-driven query-agent routing; retrieval stays in-process
 
-- **Status:** Proposed
+- **Status:** Rejected
 - **Date:** 2026-09-09
 - **Deciders:** Capstone team
 - **Relates to:** [ADR-0002](0002-query-agent-evaluation-substrate.md), [ADR-0003](0003-query-agent-stress-corpus.md)
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [ADR-0006](0006-query-agent-routing-retrieval-and-self-correction.md)
+
+> **Retired.** Consolidated into [ADR-0006](0006-query-agent-routing-retrieval-and-self-correction.md)
+> along with ADR-0005, with the additional detail live testing surfaced.
+> Kept as-is below for history - not further edited.
 
 ## Context and problem statement
 

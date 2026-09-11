@@ -8,8 +8,8 @@ expectation; this file doubles as a data source (TOML blocks) and a readable
 walkthrough (Markdown prose), same convention as
 [`query-agent-benchmark-questions.md`](query-agent-benchmark-questions.md).
 
-- Routing spec: [`docs/query-agent-prompt-templates.md`](query-agent-prompt-templates.md) · [ADR-0004](adr/0004-query-agent-routing-and-retrieval.md)
-- Self-correction loops: [ADR-0005](adr/0005-query-agent-self-correction-loops.md)
+- Routing spec: [`docs/query-agent-prompt-templates.md`](query-agent-prompt-templates.md) · [ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md)
+- Self-correction loops: [ADR-0006](adr/0006-query-agent-routing-retrieval-and-self-correction.md)
 - Referenced from: [README.md § Quick tour with the agent CLI](../README.md#4-quick-tour-with-the-agent-cli)
 
 ## Run config

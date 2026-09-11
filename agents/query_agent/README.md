@@ -40,7 +40,7 @@ clause lookup). The agent branches on the *kinds* of question and resolves each.
    the LLM planner or the deterministic backstop is never turned into a guessed
    plan: `answer()` returns `needs_clarification=true` with a targeted question
    grounded in the portfolio's real facets, bounded by `QUERY_CLARIFY_MAX_ROUNDS`
-   on both the orchestrator and the agent (ADR-0004 D3).
+   on both the orchestrator and the agent (ADR-0006 D3).
 
    `QUERY_PLAN_TOOLS=0` is a **degraded mode** for the fully-offline reviewer tour
    on a small local model: no LLM planner, deterministic keyword routing to the
@@ -49,7 +49,7 @@ clause lookup). The agent branches on the *kinds* of question and resolves each.
    are shared with the Query MCP `count_contracts` / `list_contracts` tools. If
    a synthesis-mode template (T6-T9) gathered zero clause text, replan once
    with that gap named before falling through to a safe, thinner answer
-   (`QUERY_GATHER_REPLAN_MAX_ROUNDS`, ADR-0005).
+   (`QUERY_GATHER_REPLAN_MAX_ROUNDS`, ADR-0006).
 4. **Interpret** (`QUERY_INTERPRET`, default on) - only when clause snippets were
    gathered: build the trigger → consequence → `what_matters` model. Best-effort.
 5. **Coverage** - `matched` vs what the model actually read. When a synthesis
@@ -62,7 +62,7 @@ clause lookup). The agent branches on the *kinds* of question and resolves each.
    that implies completeness while coverage is partial is rejected. An
    unsupported claim gets one bounded redraft with the specific gap named
    before shipping with a capped confidence (`QUERY_DRAFT_REVERIFY_MAX_ROUNDS`,
-   ADR-0005).
+   ADR-0006).
 
 The contract data is authoritative - the LLM cannot retrieve outside what the
 Query MCP supplies. The scratchpad (tool calls, evidence labels, `what_matters`)
@@ -134,17 +134,17 @@ QUERY_LIST_FULL_MAX=10
 QUERY_EVIDENCE_BUDGET=30
 QUERY_SEARCH_K=8
 QUERY_FAST_TIMEOUT_SECONDS=120
-QUERY_CLARIFY_MAX_ROUNDS=3      # bounds the ask-for-clarification loop (ADR-0004 D3)
-QUERY_GATHER_REPLAN_MAX_ROUNDS=1    # bounds the gather-thin replan loop (ADR-0005)
-QUERY_DRAFT_REVERIFY_MAX_ROUNDS=1   # bounds the unsupported-claim redraft loop (ADR-0005)
+QUERY_CLARIFY_MAX_ROUNDS=3      # bounds the ask-for-clarification loop (ADR-0006 D3)
+QUERY_GATHER_REPLAN_MAX_ROUNDS=1    # bounds the gather-thin replan loop (ADR-0006)
+QUERY_DRAFT_REVERIFY_MAX_ROUNDS=1   # bounds the unsupported-claim redraft loop (ADR-0006)
 ```
 
 Routing and retrieval architecture:
-[ADR-0004](../../docs/adr/0004-query-agent-routing-and-retrieval.md). Bounded
+[ADR-0006](../../docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md). Bounded
 in-request self-correction (replan on thin gather, redraft on an unsupported
 claim - distinct from the cross-turn clarification loop above, which needs a
 human reply on the next turn):
-[ADR-0005](../../docs/adr/0005-query-agent-self-correction-loops.md).
+[ADR-0006](../../docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md).
 
 Any provider available through `any-llm` works the same way; no provider-specific
 client is embedded in the agent.
