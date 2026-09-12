@@ -1,5 +1,9 @@
 # AI-Powered Contract Intelligence
 
+There are 2 ways you can use Agentic system through portal and agent cli.
+
+Following are screenshots on first time setup, running the platform, and sample screenshots for extracting a contract and finding risks on it.
+
 First Time Setup ( run scripts completes the setup and runs the platform )
 <img width="1912" height="1070" alt="Screenshot 2026-09-11 232009" src="https://github.com/user-attachments/assets/210ef2e6-fb1a-4128-83c2-11a002ae1c6d" />
 
