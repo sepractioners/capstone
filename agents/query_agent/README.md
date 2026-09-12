@@ -96,6 +96,32 @@ draft; the templates degraded mode routes to) · **S** = LLM synthesis · **cov*
 | T11 | `counterparty_profile` | D | 📇 🔢 ∑ |
 | T12 | `out_of_scope` | — | (none — escalate) |
 
+### Template Responses — How Each Template Answers Questions
+
+All 12 templates are tested end-to-end with the seeded validation portfolio. Here's what each one produces:
+
+| T# | Question Example | Response Format | Coverage |
+|---|---|---|---|
+| **T1** | "How many contracts do we have?" | Exact count + breakdown by status/type | Complete (deterministic) |
+| **T2** | "List all active vendor agreements" | Filtered list with key contract details | Partial (may show first K of matched set) |
+| **T3** | "Which contracts mention liability insurance?" | Exact matched count + contract names | Complete enumeration (not sampled) |
+| **T4** | "What's the total value of active contracts?" | Sum/average/min/max with currency | Complete (deterministic aggregation) |
+| **T5** | "Which contracts expire in the next 90 days?" | Matched count + expiration dates + parties + type | Complete (temporal filter) |
+| **T6** | "What does the indemnity clause say in contract ABC?" | Quote the clause text; flag "not stated in contract X" | One contract (or few specified) |
+| **T7** | "What's our indemnification exposure?" | Pattern description + evidence samples + "reviewed N clauses from M matching" | Partial (sampled synthesis) |
+| **T8** | "Are our NDAs consistent?" | Majority treatment + named outliers | Partial (examined a cohort, not exhaustive) |
+| **T9** | "What are the biggest contractual risks?" | Risk severity + triggered dimensions + cited text | Partial (sampled risk synthesis, first pass) |
+| **T10** | "What obligations do we owe in 90 days?" | Obligation → responsible party → due date | Complete (deterministic list) |
+| **T11** | "Show me everything with [Party]" | All contracts with that party + summary stats | Complete (party filter) |
+| **T12** | "Is this clause market-standard?" | Escalate with explanation + offer in-scope alternative | N/A (no tools, legal judgment required) |
+
+**Test modes:**
+- **D** (Deterministic) — no LLM draft; answers exact and auditable (`QUERY_PLAN_TOOLS=0` degraded mode uses these only)
+- **S** (Synthesis) — LLM builds patterns from evidence; coverage rules apply
+- **cov** (Coverage-sensitive) — must state what fraction was actually read when sampling a larger matched set
+
+Run the full quick-tour to validate all 12: [`agents/query_agent/docs/quick-tour.md`](docs/quick-tour.md).
+
 ### Original hypothesis → template mapping
 
 The templates are how the standing hypotheses / heuristics are enforced in the
@@ -125,26 +151,33 @@ only when this agent should differ from the shared `LLM_*` values.
 Query-agent behavioural knobs (read directly by `query_agent/config.py`):
 
 ```env
-QUERY_PLAN_TOOLS=1              # 0 = degraded mode (no LLM planner; see above)
-QUERY_INTERPRET=1
-QUERY_VERIFY=1
-QUERY_DETERMINISTIC_COMPOSE=1   # structural answers templated from tool output
-QUERY_MAX_TOOL_CALLS=20         # T9 needs find_contracts + search_clauses per risk topic
-QUERY_LIST_FULL_MAX=10
-QUERY_EVIDENCE_BUDGET=30
-QUERY_SEARCH_K=8
-QUERY_FAST_TIMEOUT_SECONDS=120
-QUERY_CLARIFY_MAX_ROUNDS=3      # bounds the ask-for-clarification loop (ADR-0006 D3)
-QUERY_GATHER_REPLAN_MAX_ROUNDS=1    # bounds the gather-thin replan loop (ADR-0006)
-QUERY_DRAFT_REVERIFY_MAX_ROUNDS=1   # bounds the unsupported-claim redraft loop (ADR-0006)
+# Routing and planning
+QUERY_PLAN_TOOLS=1              # 0 = degraded mode (no LLM planner, keyword routing only)
+QUERY_MAX_TOOL_CALLS=20         # T9 needs find_contracts + search_clauses per risk topic (4 topics × 2 tools = 8 min)
+
+# Reasoning steps
+QUERY_INTERPRET=1               # Build trigger → consequence → what_matters from clauses
+QUERY_VERIFY=1                  # Independent verification; drop unsupported claims
+QUERY_DETERMINISTIC_COMPOSE=1   # Structural answers templated from tool output (no LLM for counts)
+
+# Bounds and limits
+QUERY_EVIDENCE_BUDGET=30        # Max clause snippets to retrieve per call
+QUERY_SEARCH_K=8                # Top-K clauses per search_clauses call
+QUERY_LIST_FULL_MAX=10          # Max contracts to return before "showing first K of N matched"
+QUERY_FAST_TIMEOUT_SECONDS=120  # LLM call timeout
+
+# Self-correction loops (in-request, bounded)
+QUERY_CLARIFY_MAX_ROUNDS=3      # Rounds of ask-for-clarification when question fits no template (ADR-0006 D3)
+QUERY_GATHER_REPLAN_MAX_ROUNDS=1    # Replan once if synthesis template gathered zero clause text (ADR-0006)
+QUERY_DRAFT_REVERIFY_MAX_ROUNDS=1   # Redraft once if verify flags unsupported claims (ADR-0006)
 ```
 
-Routing and retrieval architecture:
-[ADR-0006](../../docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md). Bounded
-in-request self-correction (replan on thin gather, redraft on an unsupported
-claim - distinct from the cross-turn clarification loop above, which needs a
-human reply on the next turn):
-[ADR-0006](../../docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md).
+**Routing and retrieval architecture:** [ADR-0006](../../docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md). 
+
+**Bounded in-request self-correction:**
+- **Replan on thin gather** — if a synthesis-mode template (T6–T9) gathered zero clause text, replan once with that gap named, then fall back to deterministic answer
+- **Redraft on unsupported claims** — if verify flags claims not backed by evidence, redraft once with specific gaps named, then ship with capped confidence
+- **Clarification loop** — if no template fits (either LLM planner or deterministic keywords), ask a clarifying question to narrow the scope (distinct from replan/redraft loops, needs human reply on next turn)
 
 Any provider available through `any-llm` works the same way; no provider-specific
 client is embedded in the agent.
