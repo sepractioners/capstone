@@ -195,15 +195,7 @@ The `capstone-review-2026` snapshot is exactly:
 
 Each contract persists: parties (country code + role), 7 clauses with full text (Payment Terms, Governing Law, Term and Termination, plus a rotating set incl. Insurance, Indemnification, Limitation of Liability…), 1–3 obligations with descriptions and due dates, and an expiration date. Party names, clause set, and dates come from fixed pools, so re-seeding anywhere reproduces the same portfolio.
 
-**Expected answers** (the query agent composes these from tool output with no LLM call — same result on any model):
-
-| Question | Answer |
-|---|---|
-| contracts by lifecycle status | 40 total — active **24**, approved **15**, in_review **1** |
-| active vendor agreements | **2** |
-| co-branding agreements | **4** (with names) |
-| contracts mentioning liability insurance | **15** |
-| breakdown by type | distribution 7, MSA 6, services 5, amendment/co-branding/affiliate 4, vendor/reseller/license 3, nda 1 |
+**Tested responses:** See the [Query Agent Template Responses (T1–T12)](#query-agent-template-responses-t112--all-tested) section above for comprehensive examples. Deterministic templates (T1–T5, T10–T11) compose from tool output with the same result on any model. Synthesis templates (T6–T9) use LLM reasoning grounded in retrieved evidence.
 
 ### What this validates
 
@@ -239,7 +231,8 @@ provider independently - there is no single global default:
 
 | Role | Built-in default (no env set) |
 |---|---|
-| `extraction`, `review`, `planner`, `summary` | Claude (Anthropic) - `claude-haiku-4-5-20251001` |
+| `extraction` | Ollama (local) - `gemma4:latest` |
+| `review`, `planner`, `summary` | Claude (Anthropic) - `claude-haiku-4-5-20251001` |
 | `query`, `platform` | Ollama (local) - `gemma4:latest` |
 
 `LLM_PROVIDER` / `LLM_MODEL` override every role at once; `<ROLE>_LLM_*` overrides
