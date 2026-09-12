@@ -11,6 +11,12 @@ Run the Platform:
 <img width="1665" height="1067" alt="AgentScreen" src="https://github.com/user-attachments/assets/cb894108-f37c-4b6a-8b8f-9ecce185eef6" />
 <img width="1660" height="1075" alt="Agent-Extracting-PDF-Progress" src="https://github.com/user-attachments/assets/77e2bad4-e0ec-4e51-a378-153f66a2ae44" />
 
+<img width="1667" height="1077" alt="Screenshot 2026-09-11 232442" src="https://github.com/user-attachments/assets/2af1ed41-50ee-4e02-b964-fc2c42bd0568" />
+
+<img width="1666" height="1073" alt="Screenshot 2026-09-11 232628" src="https://github.com/user-attachments/assets/5eb33c17-67fb-4309-9385-033bbb3f2e84" />
+
+
+
 Upload contracts. Get instant insights.
 
 An intelligent contract platform that uses AI agents to automatically **extract obligations**, **identify risks**, and **answer questions** about your contracts. No manual review. No spreadsheets.
