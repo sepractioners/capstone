@@ -221,3 +221,55 @@ examples:
 
     confidence: medium
     uncertain: true
+
+  # RULE illustrated: T5 temporal queries (expiring contracts). Required fields:
+  # id, title, expiration_date (ISO 8601), parties [with roles], contract_type.
+  # Sort by expiration_date ascending. Always show matched count.
+  example_5:
+    query: "Which contracts expire in the next 90 days?"
+    data_provided:
+      - contract_lists:
+          matched: 2
+          filter: {expiring_within_days: 90}
+          contracts:
+            - id: "CA-2026-001"
+              title: "Blue Yonder Logistics - Contoso Affiliate Agreement"
+              expiration_date: "2026-11-15"
+              parties:
+                - legal_name: "Blue Yonder Corp"
+                  roles: ["affiliate"]
+                - legal_name: "Contoso Logistics"
+                  roles: ["company"]
+              contract_type: "affiliate-agreement"
+              lifecycle_status: "active"
+            - id: "CB-2026-002"
+              title: "Fourth Coffee - Graphic Design Co-Branding Agreement"
+              expiration_date: "2026-10-20"
+              parties:
+                - legal_name: "Fourth Coffee Inc"
+                  roles: ["partner"]
+                - legal_name: "Graphic Design Corp"
+                  roles: ["partner"]
+              contract_type: "co-branding-agreement"
+              lifecycle_status: "active"
+
+    answer: |
+      **2 contracts** expire within the next 90 days:
+      1. **Blue Yonder Logistics - Contoso Affiliate Agreement**
+         - Expiry: **2026-11-15**
+         - Parties: Blue Yonder Corp [affiliate], Contoso Logistics [company]
+         - Type: affiliate-agreement
+         - Status: active
+      2. **Fourth Coffee - Graphic Design Co-Branding Agreement**
+         - Expiry: **2026-10-20**
+         - Parties: Fourth Coffee Inc [partner], Graphic Design Corp [partner]
+         - Type: co-branding-agreement
+         - Status: active
+
+    citations: |
+      - {"contract_id": "portfolio", "label": "list_contracts.matched", "evidence": "2 (filter: expiring_within_days=90)"}
+      - {"contract_id": "CA-2026-001", "label": "key_dates.expiration_date", "evidence": "2026-11-15"}
+      - {"contract_id": "CB-2026-002", "label": "key_dates.expiration_date", "evidence": "2026-10-20"}
+
+    confidence: high
+    uncertain: false

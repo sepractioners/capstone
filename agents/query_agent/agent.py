@@ -862,6 +862,43 @@ async def _verify(
     return verified, parsed
 
 
+def _validate_response_fields(answer_text: str, template_id: str) -> dict[str, Any]:
+    """Validate that the response includes required fields for the template.
+
+    Returns a dict with keys: has_required_fields (bool), missing_fields (list),
+    warnings (list). This is informational - does not modify the answer."""
+    template = _TEMPLATES.get(template_id, {})
+    required_fields = [
+        f["name"] for f in template.get("response_fields", [])
+        if f.get("always", False)
+    ]
+
+    if not required_fields or template_id not in _TEMPLATES:
+        return {"has_required_fields": True, "missing_fields": [], "warnings": []}
+
+    missing = []
+    for field in required_fields:
+        # Simple heuristic: check if the field name appears in the answer
+        # (case-insensitive, word-boundary aware)
+        if not re.search(rf"\b{re.escape(field)}\b", answer_text, re.IGNORECASE):
+            missing.append(field)
+
+    warnings = []
+    if template_id == "T5_expiring_and_renewals":
+        # T5-specific: check for ISO date format (YYYY-MM-DD)
+        if not re.search(r"\d{4}-\d{2}-\d{2}", answer_text):
+            warnings.append("T5: No dates in ISO 8601 format (YYYY-MM-DD) found; expected expiration dates")
+        # Check for party roles in brackets [role]
+        if not re.search(r"\[[^\]]+\]", answer_text):
+            warnings.append("T5: Party roles not formatted as [role]; expected format 'Party Name [role]'")
+
+    return {
+        "has_required_fields": len(missing) == 0,
+        "missing_fields": missing,
+        "warnings": warnings,
+    }
+
+
 def _merge_evidence(current: list[dict[str, str]], new: list[dict[str, str]]) -> list[dict[str, str]]:
     seen = {(r["contract_id"], r["label"], r["evidence"]) for r in current}
     merged = list(current)
@@ -1011,6 +1048,17 @@ async def answer(
             rec.record("verify", note="skipped - QUERY_VERIFY=0")
     else:
         draft = await _draft_answer(question, history_text, gathered, interpretation, coverage, rec)
+
+        # Validate response fields match template requirements (informational)
+        validation = _validate_response_fields(draft.answer, resolved_plan.template)
+        if validation["missing_fields"] or validation["warnings"]:
+            rec.record(
+                "field_validation",
+                template=resolved_plan.template,
+                validation=validation,
+                note=f"Response missing fields: {validation['missing_fields']}" if validation["missing_fields"] else None
+            )
+
         if not config.verify:
             verified = draft
             rec.record("verify", note="skipped - QUERY_VERIFY=0")
@@ -1038,6 +1086,18 @@ async def answer(
                 draft = await _draft_answer(
                     question, history_text, gathered, interpretation, coverage, rec, feedback=gap
                 )
+
+                # Validate response fields on redraft too
+                validation = _validate_response_fields(draft.answer, resolved_plan.template)
+                if validation["missing_fields"] or validation["warnings"]:
+                    rec.record(
+                        "field_validation",
+                        template=resolved_plan.template,
+                        validation=validation,
+                        round=redraft_round,
+                        note=f"Redraft {redraft_round}: Response missing fields: {validation['missing_fields']}" if validation["missing_fields"] else None
+                    )
+
                 verified, verification = await _verify(question, draft, gathered, interpretation, coverage, rec)
 
     rec.record("result", output=verified.model_dump(mode="json"))

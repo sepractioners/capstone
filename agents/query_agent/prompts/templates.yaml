@@ -125,6 +125,74 @@ templates:
       question also asks what notice or action is required, add
       search_clauses("renewal notice period") over the matched set. Convey the
       matched count.
+    response_fields:
+      - name: id
+        type: UUID
+        always: true
+        description: "Contract identifier"
+      - name: title
+        type: string
+        always: true
+        description: "Contract name or title"
+      - name: expiration_date
+        type: "ISO 8601 date (YYYY-MM-DD)"
+        always: true
+        description: "Contract expiration date; mandatory for T5"
+      - name: parties
+        type: "list of {legal_name, roles}"
+        always: true
+        description: "Party names and their roles in the contract"
+      - name: contract_type
+        type: string
+        always: true
+        description: "Contract classification (vendor-agreement, MSA, etc.)"
+      - name: lifecycle_status
+        type: string
+        always: false
+        description: "Active, approved, in_review, etc. (optional but recommended)"
+    detail_level:
+      default: "summary"
+      use_full_when:
+        - "Filtered set is small (<5 contracts) AND question asks for details"
+        - "Question explicitly requests 'full records' or 'show me everything'"
+        - "Renewal/termination terms are needed (requires full contract data)"
+      fields_in_summary:
+        - id, title, expiration_date, parties, contract_type, lifecycle_status
+      fields_in_full:
+        - All fields including renewal_terms, termination_terms, key_dates, clauses
+    formatting:
+      dates: "Always use ISO 8601 format (YYYY-MM-DD)"
+      party_names: "Legal name [role] (e.g., 'Blue Yonder Corp [affiliate]')"
+      contract_list: "Numbered list; one contract per line with mandatory fields"
+      count: "Always state 'N contracts match / N shown'"
+      sorting: "Sort by expiration_date ascending (nearest expiry first)"
+    examples:
+      - question: "Which contracts expire in the next 90 days?"
+        answer: |
+          2 contracts expire within the next 90 days:
+          1. Blue Yonder Logistics - Contoso Affiliate Agreement
+             - Expiry: 2026-11-15
+             - Parties: Blue Yonder Corp [affiliate], Contoso Logistics [company]
+             - Type: affiliate-agreement
+             - Status: active
+          2. Fourth Coffee - Graphic Design Co-Branding Agreement
+             - Expiry: 2026-10-20
+             - Parties: Fourth Coffee [partner], Graphic Design Inc [partner]
+             - Type: co-branding-agreement
+             - Status: active
+      - question: "What contracts are signed in 2024?"
+        answer: |
+          4 contracts were signed (effective_date) in 2024:
+          1. Wingtip Technologies - Proseware Services Agreement
+             - Effective: 2024-03-15
+             - Expires: 2025-03-15
+             - Parties: Wingtip Technologies [client], Proseware Inc [service-provider]
+             - Type: services-agreement
+          [additional contracts...]
+    coverage: >
+      "Found N contracts expiring within the timeframe — showing details for
+      the first K. Call with a narrower party filter or contract_type for
+      specific contracts."
 
   T6_clause_detail:
     mode: S
