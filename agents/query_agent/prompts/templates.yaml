@@ -55,15 +55,21 @@ templates:
       - "show approved master services agreements"
     scaffold: >
       List the contracts matching structured criteria. Call list_contracts with
-      every filter the question names, using the exact facet spelling. detail=full
-      only when the matched set is small. Add count_contracts with the same filter
-      if a count is also asked. If matched exceeds the rows returned, say
-      "N match — showing the first K". Deciding detail: use detail=full only
-      when the filter names 2+ facets together (e.g. status AND type AND
-      party) or the question asks for full records explicitly ("show me the
-      details", "full records") - a single-facet filter ("active contracts",
-      "NDAs") is usually a large set, use detail=summary. When unsure, default
-      to detail=summary; a follow-up can always ask for more on one contract.
+      every filter the question names, using the exact facet spelling. Add
+      count_contracts with the same filter if a count is also asked. If matched
+      exceeds the rows returned, say "N match — showing the first K". Deciding
+      detail: use detail="full" when the filter names 2+ facets together (e.g.
+      status AND type AND party) or the question asks for full records explicitly
+      ("show me the details", "full records"); use detail="summary" for single-facet
+      filters ("active contracts", "NDAs") which often return large sets. When unsure,
+      default to detail="summary"; a follow-up can always ask for more details.
+    detail_level:
+      default: "summary"
+      use_full_when:
+        - "Multiple facets are combined (status + type + party)"
+        - "Question explicitly requests 'full records' or detailed information"
+        - "Answer needs to include key_dates, clauses, or obligations"
+      note: "T2 is listing contracts; return only what the question needs"
 
   T3_clause_presence:
     mode: D cov
@@ -201,10 +207,13 @@ templates:
       - "the liability cap in our largest deal"
     scaffold: >
       Explain a specific clause for one or a few contracts. If a contract is named
-      but its id is unknown, call list_contracts to resolve it, then
-      search_clauses(query=<clause topic>) scoped to it. Quote or paraphrase only
-      what the evidence contains; if the clause is not present, say "not stated in
-      <contract>". Bounded by construction — low coverage risk.
+      but its id is unknown, call list_contracts with detail="full" to resolve it,
+      then search_clauses(query=<clause topic>) scoped to it. Quote or paraphrase
+      only what the evidence contains; if the clause is not present, say "not
+      stated in <contract>". Bounded by construction — low coverage risk.
+    detail_level:
+      default: "full"
+      rationale: "T6 needs full contract records to find clause context and related terms"
     deduction_procedure: >
       Read every retrieved clause for the named contract before answering -
       not just the first one returned. Quote or closely paraphrase only what
@@ -256,9 +265,13 @@ templates:
       - "which contracts have the most unfavourable <dimension>"
     scaffold: >
       Compare a contract to a cohort, or check consistency across one. Call
-      list_contracts for the cohort and search_clauses for the clauses in
-      question across it. Report the shared pattern and name the outliers. State
-      how many of the cohort you actually examined.
+      list_contracts with detail="full" for the cohort to access all contract
+      fields, and search_clauses for the clauses in question across it. Report
+      the shared pattern and name the outliers. State how many of the cohort you
+      actually examined.
+    detail_level:
+      default: "full"
+      rationale: "T8 needs full contracts to compare clause patterns and identify outliers"
     deduction_procedure: >
       First determine the cohort's majority/typical treatment of the
       dimension in question from the clauses you actually retrieved - do not
@@ -288,10 +301,13 @@ templates:
       alone tells you a contract touches the topic, never what it says. A topic
       you only ran find_contracts on has no evidence and must not be discussed
       in the answer; say it was matched but not reviewed this pass instead. Also
-      call list_contracts expiring_within_days=90 for near-term deadlines. Build
-      what_matters only from clauses you actually retrieved via search_clauses -
-      each point needs a one-line why, a severity, and the contract_id it came
-      from. Never assert a risk without a cited clause.
+      call list_contracts with detail="full" and expiring_within_days=90 for
+      near-term deadlines. Build what_matters only from clauses you actually
+      retrieved via search_clauses - each point needs a one-line why, a severity,
+      and the contract_id it came from. Never assert a risk without a cited clause.
+    detail_level:
+      default: "full"
+      rationale: "T9 checks near-term deadlines via key_dates, requires full contract records"
     deduction_procedure: >
       For each retrieved clause, produce exactly ONE what_matters point - never
       one point per dimension. Do this in order and show the work, don't skip
@@ -345,14 +361,18 @@ templates:
       - "who have we signed the most deals with"
     scaffold: >
       Party-centric. For "everything with <party>" call list_contracts
-      party=<name>. For rankings call aggregate_contracts group_by=party (measure
-      count or sum_value). Report per-party figures exactly as the tool returns.
-      Deciding which tool: the question names one specific party -> list_contracts
-      party=<name>, never aggregate_contracts (there's nothing to rank with one
+      party=<name> with detail="full" to show all contract details. For rankings
+      call aggregate_contracts group_by=party (measure count or sum_value).
+      Report per-party figures exactly as the tool returns. Deciding which tool:
+      the question names one specific party -> list_contracts party=<name> with
+      detail="full", never aggregate_contracts (there's nothing to rank with one
       party). The question asks "top" / "most" / "ranked by" with no single
       party named -> aggregate_contracts group_by=party - measure=count for
       "most deals/contracts", measure=sum_value for "most valuable" / "highest
       spend".
+    detail_level:
+      default: "full"
+      rationale: "Party profiles need comprehensive contract information to answer 'everything with <party>'"
 
   T12_out_of_scope:
     mode: D
