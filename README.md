@@ -15,6 +15,10 @@ Run the Platform:
 
 <img width="1666" height="1073" alt="Screenshot 2026-09-11 232628" src="https://github.com/user-attachments/assets/5eb33c17-67fb-4309-9385-033bbb3f2e84" />
 
+Asking the agent to identify risks in a Contract.
+<img width="1668" height="1077" alt="Screenshot 2026-09-11 233141" src="https://github.com/user-attachments/assets/affc2f37-45f8-433e-84ac-7567b3431110" />
+
+
 Agent Observability:
 <img width="1667" height="1077" alt="Agent-Observability-Admin-Console" src="https://github.com/user-attachments/assets/22de81e2-4d9f-4c70-9c2a-b3b6461e339b" />
 
