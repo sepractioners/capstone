@@ -153,20 +153,20 @@ The Query MCP re-checks organization membership on every call. The agent cannot 
 
 Each template produces a distinct response format. These examples are from the seeded validation portfolio and verified to work end-to-end:
 
-| T# | User Question | Agent Response | Mode |
-|---|---|---|---|
-| **T1** | "How many contracts do we have?" | "**40 contracts total** in the portfolio. By status: **24 active**, **15 approved**, **1 in review**" | D |
-| **T2** | "List all active vendor agreements" | "**2 active vendor agreements**: 1. Contoso Vendor Services Agreement (effective 2024-03-15, expires 2025-03-15) 2. Wingtip Technologies Vendor Agreement (effective 2024-06-01, expires 2025-06-01)" | D cov |
-| **T3** | "Which contracts mention liability insurance?" | "**15 contracts** contain liability insurance requirements or references." | D cov |
-| **T4** | "What's the total value of active contracts?" | "**Total value of active contracts: $4,250,000 USD**. Average: $177,083 per contract. Range: $50,000–$850,000" | D |
-| **T5** | "Which contracts expire in the next 90 days?" | "**2 contracts** expire within the next 90 days: 1. Blue Yonder Logistics - Contoso Affiliate Agreement (Expiry: 2026-11-15) 2. Fourth Coffee - Graphic Design Co-Branding Agreement (Expiry: 2026-10-20)" | D→S |
-| **T6** | "What does the indemnity clause say in contract ABC?" | "The indemnity clause states: 'Each party shall indemnify, defend, and hold harmless the other party from all third-party claims arising from breach of this agreement, excluding gross negligence.' This is standard mutual indemnity with carve-outs for gross negligence." | S |
-| **T7** | "What's our indemnification exposure across the portfolio?" | "**26 contracts** (65% of portfolio) contain indemnification clauses. Common pattern: 18 contracts use mutual indemnity; 8 shift all liability to us. Reviewed the top evidence across 26 matching contracts—ask for the full list." | S cov |
-| **T8** | "Are our NDAs consistent?" | "**4 NDAs** reviewed. Standard term: 3-year confidentiality period post-termination. Outlier: Tech Partners NDA has a 5-year period. Standard recourse: Each has a liquidated damages clause; Tech Partners' clause is higher ($250K vs. typical $50K)." | S cov |
-| **T9** | "What are the biggest contractual risks?" | "**High risk** — Uncapped indemnification in DA-2023-007: 'indemnify without limitation' exposes us to unlimited defense costs. **Medium risk** — Auto-renewal lock-in on MSA-2024-002: 90-day opt-out window; easy to miss deadline. Reviewed indemnity, liability caps, termination, auto-renewal across 31 matching contracts—first pass, not exhaustive." | S cov |
-| **T10** | "What obligations do we owe in the next 90 days?" | "**3 obligations due:** 1. Payment to Contoso: $50,000 due 2026-10-15 2. Compliance report to Blue Yonder due 2026-11-01 3. License renewal notice to Tech Partners due 2026-12-10" | D |
-| **T11** | "Show me everything we have with Contoso" | "**3 contracts** with Contoso Logistics: 1. Master Services Agreement (active, $500K/year) 2. Affiliate Agreement (expiring 2026-11-15) 3. Data Processing Addendum (approved, effective 2026-01-01)" | D |
-| **T12** | "Is this clause market-standard?" | "I can report what your contracts state, but I can't assess whether a term is market-standard—that requires legal expertise outside my scope. Instead, I can: (1) show you how this clause appears in your other contracts, or (2) explain what this specific contract text says." | — |
+| T# | User Question | Agent Response |
+|---|---|---|
+| **T1** | "How many contracts do we have?" | "**40 contracts total** in the portfolio. By status: **24 active**, **15 approved**, **1 in review**" |
+| **T2** | "List all active vendor agreements" | "**2 active vendor agreements**: 1. Contoso Vendor Services Agreement (effective 2024-03-15, expires 2025-03-15) 2. Wingtip Technologies Vendor Agreement (effective 2024-06-01, expires 2025-06-01)" |
+| **T3** | "Which contracts mention liability insurance?" | "**15 contracts** contain liability insurance requirements or references." |
+| **T4** | "What's the total value of active contracts?" | "**Total value of active contracts: $4,250,000 USD**. Average: $177,083 per contract. Range: $50,000–$850,000" |
+| **T5** | "Which contracts expire in the next 90 days?" | "**2 contracts** expire within the next 90 days: 1. Blue Yonder Logistics - Contoso Affiliate Agreement (Expiry: 2026-11-15) 2. Fourth Coffee - Graphic Design Co-Branding Agreement (Expiry: 2026-10-20)" |
+| **T6** | "What does the indemnity clause say in contract ABC?" | "The indemnity clause states: 'Each party shall indemnify, defend, and hold harmless the other party from all third-party claims arising from breach of this agreement, excluding gross negligence.' This is standard mutual indemnity with carve-outs for gross negligence." |
+| **T7** | "What's our indemnification exposure across the portfolio?" | "**26 contracts** (65% of portfolio) contain indemnification clauses. Common pattern: 18 contracts use mutual indemnity; 8 shift all liability to us. Reviewed the top evidence across 26 matching contracts—ask for the full list." |
+| **T8** | "Are our NDAs consistent?" | "**4 NDAs** reviewed. Standard term: 3-year confidentiality period post-termination. Outlier: Tech Partners NDA has a 5-year period. Standard recourse: Each has a liquidated damages clause; Tech Partners' clause is higher ($250K vs. typical $50K)." |
+| **T9** | "What are the biggest contractual risks?" | "**High risk** — Uncapped indemnification in DA-2023-007: 'indemnify without limitation' exposes us to unlimited defense costs. **Medium risk** — Auto-renewal lock-in on MSA-2024-002: 90-day opt-out window; easy to miss deadline. Reviewed indemnity, liability caps, termination, auto-renewal across 31 matching contracts—first pass, not exhaustive." |
+| **T10** | "What obligations do we owe in the next 90 days?" | "**3 obligations due:** 1. Payment to Contoso: $50,000 due 2026-10-15 2. Compliance report to Blue Yonder due 2026-11-01 3. License renewal notice to Tech Partners due 2026-12-10" |
+| **T11** | "Show me everything we have with Contoso" | "**3 contracts** with Contoso Logistics: 1. Master Services Agreement (active, $500K/year) 2. Affiliate Agreement (expiring 2026-11-15) 3. Data Processing Addendum (approved, effective 2026-01-01)" |
+| **T12** | "Is this clause market-standard?" | "I can report what your contracts state, but I can't assess whether a term is market-standard—that requires legal expertise outside my scope. Instead, I can: (1) show you how this clause appears in your other contracts, or (2) explain what this specific contract text says." |
 
 **Test each template** via CLI: `bash scripts/agent.sh ask "<question>"` (see [Quick Tour](agents/query_agent/docs/quick-tour.md) for the exact tested questions).
 
