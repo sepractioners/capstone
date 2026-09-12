@@ -15,6 +15,11 @@ Run the Platform:
 
 <img width="1666" height="1073" alt="Screenshot 2026-09-11 232628" src="https://github.com/user-attachments/assets/5eb33c17-67fb-4309-9385-033bbb3f2e84" />
 
+Agent Observability:
+<img width="1667" height="1077" alt="Agent-Observability-Admin-Console" src="https://github.com/user-attachments/assets/22de81e2-4d9f-4c70-9c2a-b3b6461e339b" />
+
+
+<img width="1667" height="1070" alt="Agent-Observability-Admin-Traces" src="https://github.com/user-attachments/assets/a69dec36-9c7a-4811-a6b8-9e58be1529a1" />
 
 
 Upload contracts. Get instant insights.
