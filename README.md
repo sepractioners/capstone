@@ -1,4 +1,11 @@
 # AI-Powered Contract Intelligence
+
+First Time Setup ( run scripts completes the setup and runs the platform )
+<img width="1912" height="1070" alt="Screenshot 2026-09-11 232009" src="https://github.com/user-attachments/assets/210ef2e6-fb1a-4128-83c2-11a002ae1c6d" />
+
+Run the Platform:
+<img width="1917" height="1075" alt="Screenshot 2026-09-11 231906" src="https://github.com/user-attachments/assets/58cc8fa4-e214-4da2-b63a-688a8acb368f" />
+
 <img width="1667" height="1066" alt="Portal-Login" src="https://github.com/user-attachments/assets/7daf39b3-9dfd-4548-bc08-32526ea5f067" />
 <img width="1667" height="1065" alt="Portal-Dashboard" src="https://github.com/user-attachments/assets/f70befdd-e116-4001-a808-b79faef46063" />
 <img width="1665" height="1067" alt="AgentScreen" src="https://github.com/user-attachments/assets/cb894108-f37c-4b6a-8b8f-9ecce185eef6" />
