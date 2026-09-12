@@ -1,5 +1,7 @@
 # AI-Powered Contract Intelligence
 
+Setup Video: https://www.youtube.com/watch?v=jQzySikcES0
+
 Upload contracts. Get instant insights.
 
 An intelligent contract platform that uses AI agents to automatically **extract obligations**, **identify risks**, and **answer questions** about your contracts. No manual review. No spreadsheets.
