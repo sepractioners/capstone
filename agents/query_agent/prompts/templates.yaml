@@ -116,15 +116,16 @@ templates:
       - "up for renewal soon"
     scaffold: >
       Temporal question. Call list_contracts with expiring_within_days (pass the
-      window in days — never compute a date) or effective_year. Deriving the
-      window: "next quarter" / "soon" / "coming up" -> 90; "this month" -> 30;
-      "this year" -> 365; a number the question states ("next 60 days") ->
-      that number, always in days. "Signed in <year>" / "dated <year>" is
-      effective_year, not expiring_within_days - pick whichever the question
-      is actually asking about (when it starts vs. when it ends). Only if the
-      question also asks what notice or action is required, add
+      window in days — never compute a date) or effective_year, and ALWAYS use
+      detail="full" so expiration_date and other key_dates are included in the
+      response. Deriving the window: "next quarter" / "soon" / "coming up" -> 90;
+      "this month" -> 30; "this year" -> 365; a number the question states
+      ("next 60 days") -> that number, always in days. "Signed in <year>" /
+      "dated <year>" is effective_year, not expiring_within_days - pick whichever
+      the question is actually asking about (when it starts vs. when it ends).
+      Only if the question also asks what notice or action is required, add
       search_clauses("renewal notice period") over the matched set. Convey the
-      matched count.
+      matched count and expiration_date for each contract.
     response_fields:
       - name: id
         type: UUID
@@ -151,15 +152,12 @@ templates:
         always: false
         description: "Active, approved, in_review, etc. (optional but recommended)"
     detail_level:
-      default: "summary"
-      use_full_when:
-        - "Filtered set is small (<5 contracts) AND question asks for details"
-        - "Question explicitly requests 'full records' or 'show me everything'"
-        - "Renewal/termination terms are needed (requires full contract data)"
-      fields_in_summary:
-        - id, title, expiration_date, parties, contract_type, lifecycle_status
+      default: "full"  # T5 MUST use full detail to access key_dates (expiration_date, effective_date, etc.)
+      rationale: "Temporal queries require access to key_dates fields which are only available in detail='full'"
+      fields_returned:
+        - id, title, expiration_date, effective_date, parties, contract_type, lifecycle_status
       fields_in_full:
-        - All fields including renewal_terms, termination_terms, key_dates, clauses
+        - All fields including renewal_terms, termination_terms, all key_dates, clauses, obligations
     formatting:
       dates: "Always use ISO 8601 format (YYYY-MM-DD)"
       party_names: "Legal name [role] (e.g., 'Blue Yonder Corp [affiliate]')"
