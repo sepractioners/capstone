@@ -168,7 +168,28 @@ Each template produces a distinct response format. These examples are from the s
 | **T11** | "Show me everything we have with Contoso" | "**3 contracts** with Contoso Logistics: 1. Master Services Agreement (active, $500K/year) 2. Affiliate Agreement (expiring 2026-11-15) 3. Data Processing Addendum (approved, effective 2026-01-01)" |
 | **T12** | "Is this clause market-standard?" | "I can report what your contracts state, but I can't assess whether a term is market-standard—that requires legal expertise outside my scope. Instead, I can: (1) show you how this clause appears in your other contracts, or (2) explain what this specific contract text says." |
 
-**Test each template** via CLI: `bash scripts/agent.sh ask "<question>"` (see [Quick Tour](agents/query_agent/docs/quick-tour.md) for the exact tested questions).
+### Test All 12 Templates End-to-End
+
+Run one real question per prompt template (T1–T12) with literal captured answers through the CLI:
+
+```bash
+bash scripts/agent.sh ask "How many contracts do we have?"
+bash scripts/agent.sh ask "List all active vendor agreements"
+bash scripts/agent.sh ask "Which contracts mention liability insurance?"
+bash scripts/agent.sh ask "What's the total value of active contracts?"
+bash scripts/agent.sh ask "Which contracts expire in the next 90 days?"
+bash scripts/agent.sh ask "What does the indemnity clause say?"
+bash scripts/agent.sh ask "What's our indemnification exposure?"
+bash scripts/agent.sh ask "Are our NDAs consistent?"
+bash scripts/agent.sh ask "What are the biggest contractual risks?"
+bash scripts/agent.sh ask "What obligations do we owe in 90 days?"
+bash scripts/agent.sh ask "Show me everything with Contoso"
+bash scripts/agent.sh ask "Is this clause market-standard?"
+```
+
+**Full test guide with exact tested questions and expected responses:** [`agents/query_agent/docs/quick-tour.md`](agents/query_agent/docs/quick-tour.md)
+
+Each question exercises a different template (T1–T12) and validates the complete query pipeline end-to-end.
 
 ---
 
