@@ -2,6 +2,13 @@
 
 There are 2 ways you can use Agentic system through portal and agent cli.
 
+Query/ Analysis Agent uses the following technique to reduce non deterministic hallucinations:
+
+Mapping Hypothetical Domain Bounded Context to Heuristics on MCP ( composing Tools, Resources and Prompts as Workflows )
+
+https://icml.cc/virtual/2026/workshop/54054
+Uncertainty in agentic workflows can be significantly reduced by offloading non-deterministic task resolution to a Model Context Protocol (MCP) server that evaluates actions against a hypothetical domain-bounded context mapped to strict heuristics.
+
 Following are screenshots on first time setup, running the platform, and sample screenshots for extracting a contract and finding risks on it.
 
 First Time Setup ( run scripts completes the setup and runs the platform )
