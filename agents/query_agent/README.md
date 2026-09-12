@@ -64,6 +64,8 @@ clause lookup). The agent branches on the *kinds* of question and resolves each.
    before shipping with a capped confidence (`QUERY_DRAFT_REVERIFY_MAX_ROUNDS`,
    ADR-0006).
 
+**Citations format:** Portfolio-level data (counts, aggregates, lists) are assigned `contract_id="portfolio"` with labels like `count.matched`, `count.total`, `aggregate.sum_value`, `contract_lists.matched`. Individual contract claims cite the real contract UUID with labels like `obligation_42`, `clause_15`. Evidence always contains the concrete value or quote — never a field name or empty array.
+
 The contract data is authoritative - the LLM cannot retrieve outside what the
 Query MCP supplies. The scratchpad (tool calls, evidence labels, `what_matters`)
 is working memory, discarded after the response. Every step falls back

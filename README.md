@@ -147,6 +147,8 @@ Without `CLM_AGENT_TOKEN`, `clm-agent` prompts for a bearer token interactively.
 5. **Draft** — synthesise across counts, lists, and clause evidence with citations, a confidence value, and an uncertainty flag.
 6. **Verify** — counts and lists are authoritative for numbers; clause claims must be backed by cited evidence; an answer implying completeness while coverage is partial is rejected. An unsupported claim gets one bounded redraft before shipping with a capped confidence ([ADR-0006](docs/adr/0006-query-agent-routing-retrieval-and-self-correction.md)).
 
+**Citations:** Every answer includes citations grounding claims in data. Portfolio-level data (counts, aggregates, lists) use `contract_id="portfolio"` with labels like `count.matched`, `count.total`, `aggregate.sum_value`, `contract_lists.matched`. Individual contract clauses cite the real contract UUID with labels like `obligation_42`, `clause_15`. The evidence field always contains the concrete value or quote — never a field name or empty value.
+
 The Query MCP re-checks organization membership on every call. The agent cannot retrieve outside what the MCP returns; a provider failure returns a terminal run failure, not a fabricated answer.
 
 ### Query Agent Template Responses (T1–T12) — All Tested
